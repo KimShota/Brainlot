@@ -171,13 +171,13 @@ Deno.serve(async (req) => {
 
     // Prompt for MCQ generation
     const prompt = `
-You are an expert MCQ generator. Create 30 high-quality multiple-choice questions based EXCLUSIVELY on the content provided in the study material.
+You are an expert MCQ generator. Create 30 high-quality multiple-choice questions that test users' understanding and knowledge of the concepts, facts, and ideas covered in the study material.
 
 CRITICAL REQUIREMENTS:
-1. Questions MUST test understanding of the actual content, concepts, facts, and processes described in the material
-2. Questions must be answerable from MEMORY - users should NOT need to look back at the material
-3. AVOID questions about document structure, navigation, images, figures, charts, or "where to find information"
-4. FOCUS on testing knowledge of the subject matter itself
+1. Questions MUST test understanding and knowledge of concepts, facts, and ideas - NOT retrieval of specific text passages
+2. Questions must be answerable from MEMORY and COMPREHENSION - users should NOT need to look back at the material
+3. NEVER use words like "text", "document", "passage", "material", "according to", "mentioned", "stated", "explained", "notes", or "discusses" in the question itself
+4. Focus on testing KNOWLEDGE and UNDERSTANDING of the subject matter, not memory of specific wording
 5. Each question must have exactly 4 options
 6. Include "answer_index" (0-based index) for the correct answer
 7. Respond ONLY with a valid JSON array - no markdown, no code blocks, no additional text
@@ -185,30 +185,39 @@ CRITICAL REQUIREMENTS:
 QUESTION TYPES TO INCLUDE:
 - Factual knowledge questions (definitions, key facts, numbers, measurements)
 - Conceptual understanding questions (processes, relationships, cause and effect)
-- Application questions (using information to solve problems or make predictions)
+- Application questions (using knowledge to solve problems or make predictions)
 - Analysis questions (comparing, contrasting, identifying patterns)
-- Questions about concepts, theories, formulas, or principles mentioned in the text
+- Questions about concepts, theories, formulas, or principles
+- Questions about historical events, people, dates, or facts
+- Questions about scientific processes, chemical reactions, or biological processes
+- Questions about mathematical concepts, equations, or calculations
 
 QUESTION TYPES TO STRICTLY AVOID:
+- ANY questions that reference "text", "document", "passage", "material", "according to", "mentioned", "stated", "explained", "notes", "discusses"
+- Questions asking "what does the image/figure/chart show" or "what is depicted in the image"
 - Questions about document layout, structure, or organization
 - Questions asking "where to find information" or "which page/section"
-- Questions about images, figures, charts, diagrams, or visual elements
-- Questions asking "what does the image/figure/chart show"
 - Questions about study tips, learning strategies, or methodology
 - Questions not directly covered in the provided material
 - Questions requiring visual inspection of the material
+- Questions about colors, shapes, or visual characteristics
+- Questions asking users to identify something "in the picture" or "shown in the image"
 
 GOOD EXAMPLES:
 { "question": "What is the resolving power of a light microscope?", "options": ["0.2 nm", "200 nm", "2 μm", "0.2 μm"], "answer_index": 1 }
 { "question": "Which process occurs during photosynthesis?", "options": ["Glucose breakdown", "Carbon dioxide absorption", "Protein synthesis", "DNA replication"], "answer_index": 1 }
 { "question": "What is the chemical formula for water?", "options": ["H2O", "CO2", "NaCl", "O2"], "answer_index": 0 }
+{ "question": "Who was the first African American to serve in the U.S. Senate?", "options": ["Frederick Douglass", "Hiram Revels", "Booker T. Washington", "W.E.B. Du Bois"], "answer_index": 1 }
+{ "question": "What type of sound sources exist besides musical instruments and traffic?", "options": ["Electronic devices", "Natural phenomena", "Human voices", "Animal sounds"], "answer_index": 1 }
+{ "question": "How does the speed of sound change with temperature?", "options": ["Increases by 0.6 m/s per °C", "Decreases by 0.6 m/s per °C", "Remains constant", "Increases by 3.31 m/s per °C"], "answer_index": 0 }
 
 BAD EXAMPLES (DO NOT CREATE THESE):
-{ "question": "Where can you find information about cell division?", "options": ["Chapter B2", "Study tips", "Maths skills", "Synoptic links"], "answer_index": 0 }
-{ "question": "What does the image at the bottom of page 587 depict?", "options": ["A cell", "A molecule", "A process", "A structure"], "answer_index": 0 }
-{ "question": "Which figure shows the process of mitosis?", "options": ["Figure 1", "Figure 2", "Figure 3", "Figure 4"], "answer_index": 0 }
+{ "question": "The text notes that sound waves are created by vibrations", "options": ["True", "False", "Sometimes", "Never"], "answer_index": 0 }
+{ "question": "According to the text, what is the speed of sound?", "options": ["343 m/s", "300 m/s", "400 m/s", "250 m/s"], "answer_index": 0 }
+{ "question": "What does the text explain about temperature?", "options": ["It affects sound speed", "It doesn't matter", "It's constant", "It varies"], "answer_index": 0 }
+{ "question": "The passage mentions that...", "options": ["Option A", "Option B", "Option C", "Option D"], "answer_index": 0 }
 
-Generate questions that directly test the user's comprehension and memory of the subject matter presented in the material. Users should be able to answer all questions without looking back at the original material.
+IMPORTANT: Generate questions that test users' understanding and knowledge of the subject matter. Focus on concepts, facts, and ideas that users should know and understand, not on specific wording or references to the source material. Users should be able to answer all questions based on their knowledge and comprehension of the topics covered.
 `;
 
     // Call Gemini

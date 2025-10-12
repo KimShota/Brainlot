@@ -314,16 +314,16 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         alignItems: 'flex-start',
         justifyContent: 'center',
-        minHeight: 56, // Minimum height for consistent sizing
+        minHeight: 56, // Minimum height for consistent sizing 
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
-        elevation: 2,
+        elevation: 2, 
     },
     optionText: {
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: '800',
-        lineHeight: 24,
+        lineHeight: 20,
         textAlign: 'left',
         flexWrap: 'wrap', // Ensure text wraps
         width: '100%', // Take full width for proper wrapping

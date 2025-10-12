@@ -118,11 +118,60 @@ Deno.serve(async (req) => {
       );
     }
 
+    // 1. Verify Authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Unauthorized: Missing or invalid token" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // 2. Extract and verify user from token
+    const token = authHeader.replace('Bearer ', '');
+    
+    // Create a Supabase client with the user's token for authentication
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const supabaseClient = createClient(supabaseUrl, serviceKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+    });
+
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
+    
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Unauthorized: Invalid token" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const { file_id, job_id }: Body = await req.json();
     if (!file_id) {
       return new Response(
         JSON.stringify({ ok: false, error: "file_id is missing" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // 3. Verify file ownership
+    const fileRes = await fetch(`${supabaseUrl}/rest/v1/files?id=eq.${file_id}`, { headers });
+    const files = await fileRes.json();
+    if (!files.length) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "File not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const fileRow = files[0];
+    if (fileRow.user_id !== user.id) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Unauthorized: Access denied to this file" }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -161,11 +210,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({ status: "processing" }),
     });
 
-    // Get file metadata
-    const fileRes = await fetch(`${supabaseUrl}/rest/v1/files?id=eq.${file_id}`, { headers });
-    const files = await fileRes.json();
-    if (!files.length) throw new Error("File not found");
-    const fileRow = files[0];
+    // File metadata already fetched and verified above
     const fileUrl = fileRow.public_url;
     const mimeType = fileRow.mime_type || guessMimeType(fileRow.storage_path); // 👈 fallback added
 
@@ -279,8 +324,15 @@ IMPORTANT: Generate questions that test users' understanding and knowledge of th
     );
   } catch (e) {
     console.error("Edge function error:", e);
+    
+    // Hide detailed error messages in production
+    const isDevelopment = Deno.env.get("ENVIRONMENT") === "development";
+    const errorMessage = isDevelopment 
+      ? String(e) 
+      : "An unexpected error occurred. Please try again later.";
+    
     return new Response(
-      JSON.stringify({ ok: false, error: String(e) }),
+      JSON.stringify({ ok: false, error: errorMessage }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

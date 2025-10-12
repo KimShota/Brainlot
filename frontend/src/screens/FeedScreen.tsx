@@ -60,7 +60,7 @@ export default function FeedScreen({ navigation }: any) {
             // Get current user
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
-                console.log('No authenticated user found');
+                if (__DEV__) console.log('No authenticated user found');
                 setLoading(false);
                 return;
             }

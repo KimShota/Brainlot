@@ -11,5 +11,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnon, { //users can ed
     },
 }); 
 
-console.log("URL from env:", process.env.EXPO_PUBLIC_SUPABASE_URL);
-console.log("Anon key from env:", process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.slice(0, 15) + "...");
+// Only log in development environment
+if (__DEV__) {
+    console.log("URL from env:", process.env.EXPO_PUBLIC_SUPABASE_URL);
+    console.log("Anon key from env:", process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.slice(0, 15) + "...");
+}

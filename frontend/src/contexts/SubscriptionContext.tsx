@@ -101,7 +101,7 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         };
         
         setOfferings(mockOfferings);
-        console.log('Mock RevenueCat initialized');
+        if (__DEV__) console.log('Mock RevenueCat initialized');
       } catch (error) {
         console.error('Error initializing mock RevenueCat:', error);
       }

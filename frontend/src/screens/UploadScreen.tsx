@@ -147,23 +147,46 @@ async function loadImage(){
         try {
             setLoading(true); //set loading state to true 
 
-        // Get current user first
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-            throw new Error("User not authenticated");
+        // 1. Validate MIME type
+        const ALLOWED_MIME_TYPES = [
+            'application/pdf',
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/gif',
+            'image/webp'
+        ];
+        
+        if (!ALLOWED_MIME_TYPES.includes(mime)) {
+            throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
         }
 
-        // Delete all previous MCQs for this user before uploading new material
-        // This ensures a clean slate for each new upload session
+        // 2. Get current user first
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            throw new Error("User not authenticated. Please log in.");
+        }
+
+        // 3. Load file and validate size
+        const file = await fetch(uri);
+        const arrayBuffer = await file.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        
+        const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+        if (uint8Array.length > MAX_FILE_SIZE) {
+            throw new Error(`File too large. Maximum size is 20MB. Your file is ${(uint8Array.length / 1024 / 1024).toFixed(1)}MB.`);
+        }
+
+        // 4. Delete all previous MCQs and files for this user
         const { data: previousFiles } = await supabase
             .from("files")
-            .select("id")
+            .select("id, storage_path")
             .eq("user_id", user.id);
         
         if (previousFiles && previousFiles.length > 0) {
             const fileIds = previousFiles.map(f => f.id);
             
-            // Delete all MCQs associated with this user's previous files
+            // Delete MCQs
             const { error: deleteMcqError } = await supabase
                 .from("mcqs")
                 .delete()
@@ -171,18 +194,33 @@ async function loadImage(){
             
             if (deleteMcqError) {
                 console.warn("Failed to delete previous MCQs:", deleteMcqError);
-                // Continue anyway - this is not critical
+            }
+            
+            // Delete storage files
+            const storagePaths = previousFiles.map(f => f.storage_path);
+            const { error: deleteStorageError } = await supabase.storage
+                .from("study")
+                .remove(storagePaths);
+            
+            if (deleteStorageError) {
+                console.warn("Failed to delete previous storage files:", deleteStorageError);
+            }
+            
+            // Delete file records
+            const { error: deleteFilesError } = await supabase
+                .from("files")
+                .delete()
+                .in("id", fileIds);
+            
+            if (deleteFilesError) {
+                console.warn("Failed to delete previous file records:", deleteFilesError);
             }
         }
 
-        //creates a filename and path
-        const fileExt = uri.split(".").pop() ?? "bin"; //take pdf at the last
+        // 5. Create filename and path (include user_id for security)
+        const fileExt = uri.split(".").pop() ?? "bin";
         const fileName = `${Date.now()}.${fileExt}`; 
-        const filePath = `upload/${fileName}`; 
-
-        const file = await fetch(uri); //ask the server to get the file path data
-        const arrayBuffer = await file.arrayBuffer(); //take the raw bits of filepath
-        const uint8Array = new Uint8Array(arrayBuffer); //makes an array where each element consists of 8 bits
+        const filePath = `${user.id}/${fileName}`; // Include user_id in path for security
 
 
         //store the file path into the upload folder inside storage 
@@ -214,13 +252,20 @@ async function loadImage(){
         if (fErr) throw fErr; 
         const fileRow = files![0]; 
 
-        const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!; //get supabase public url 
+        // 6. Get user session token for authentication
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+            throw new Error("No active session. Please log in again.");
+        }
+
+        // 7. Call Edge Function with user token
+        const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
         const fnRes = await fetch(`${baseUrl}${function_url}`, {
             method: "POST", 
             headers: {
                 "Content-Type": "application/json", 
-                apikey:  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!, //anon key (public api key to access database with RLS)
-                Authorization: `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!}`,
+                apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+                Authorization: `Bearer ${session.access_token}`, // Use user's token instead of anon key
             },
             body: JSON.stringify({ file_id: fileRow.id }),
         }); 
@@ -237,19 +282,28 @@ async function loadImage(){
         } catch (e: any) {
             let errorMessage = e.message ?? String(e);
             
-            // Parse Gemini API errors for better user experience
-            if (errorMessage.includes("503") || errorMessage.includes("UNAVAILABLE")) {
+            // Parse errors for better user experience
+            if (errorMessage.includes("Invalid file type")) {
+                // Keep the original error message
+            } else if (errorMessage.includes("File too large")) {
+                // Keep the original error message
+            } else if (errorMessage.includes("not authenticated") || errorMessage.includes("No active session")) {
+                errorMessage = "Please log in to upload files.";
+            } else if (errorMessage.includes("503") || errorMessage.includes("UNAVAILABLE")) {
                 errorMessage = "The AI service is temporarily unavailable. Please try again in a few minutes.";
             } else if (errorMessage.includes("400") || errorMessage.includes("INVALID_ARGUMENT")) {
                 errorMessage = "The file format is not supported. Please try a different file.";
-            } else if (errorMessage.includes("403") || errorMessage.includes("PERMISSION_DENIED")) {
-                errorMessage = "Access denied. Please check your API configuration.";
-            } else if (errorMessage.includes("File too large")) {
-                errorMessage = "The image file is too large. Please compress it or use a smaller image.";
+            } else if (errorMessage.includes("401") || errorMessage.includes("Unauthorized")) {
+                errorMessage = "Authentication failed. Please log in again.";
+            } else if (errorMessage.includes("403") || errorMessage.includes("Access denied")) {
+                errorMessage = "Access denied. You don't have permission to perform this action.";
             } else if (errorMessage.includes("413") || errorMessage.includes("PAYLOAD_TOO_LARGE")) {
-                errorMessage = "The image file is too large. Please compress it or use a smaller image.";
+                errorMessage = "The file is too large. Please use a smaller file.";
             } else if (errorMessage.includes("429") || errorMessage.includes("QUOTA_EXCEEDED")) {
                 errorMessage = "API quota exceeded. Please try again later.";
+            } else {
+                // Generic error message for unexpected errors
+                errorMessage = "An error occurred during upload. Please try again.";
             }
             
             Alert.alert("Upload Error", errorMessage); 

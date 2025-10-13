@@ -6,6 +6,11 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Rate limiting configuration
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+const MAX_REQUESTS_PER_WINDOW = 10; // Max 10 requests per minute per user
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
 console.log("🚀 Deployed generate-mcqs function is running with Gemini 2.5 Flash-Lite");
 
 const headers = {
@@ -109,6 +114,40 @@ async function callGeminiWithFile(fileUrl: string, mimeType: string, prompt: str
   }
 }
 
+// Rate limiting helper function
+function checkRateLimit(userId: string): { allowed: boolean; retryAfter?: number } {
+  const now = Date.now();
+  const userLimit = rateLimitMap.get(userId);
+
+  // Clean up expired entries periodically
+  if (rateLimitMap.size > 1000) {
+    for (const [key, value] of rateLimitMap.entries()) {
+      if (value.resetAt < now) {
+        rateLimitMap.delete(key);
+      }
+    }
+  }
+
+  if (!userLimit || userLimit.resetAt < now) {
+    // First request or window expired - reset
+    rateLimitMap.set(userId, {
+      count: 1,
+      resetAt: now + RATE_LIMIT_WINDOW_MS,
+    });
+    return { allowed: true };
+  }
+
+  if (userLimit.count >= MAX_REQUESTS_PER_WINDOW) {
+    // Rate limit exceeded
+    const retryAfter = Math.ceil((userLimit.resetAt - now) / 1000);
+    return { allowed: false, retryAfter };
+  }
+
+  // Increment count
+  userLimit.count++;
+  return { allowed: true };
+}
+
 Deno.serve(async (req) => {
   try {
     if (req.method !== "POST") {
@@ -130,9 +169,11 @@ Deno.serve(async (req) => {
     // 2. Extract and verify user from token
     const token = authHeader.replace('Bearer ', '');
     
+    // Import createClient once at the top of the request handler
+    const { createClient: createSupabaseClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    
     // Create a Supabase client with the user's token for authentication
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const supabaseClient = createClient(supabaseUrl, serviceKey, {
+    const supabaseClient = createSupabaseClient(supabaseUrl, serviceKey, {
       global: {
         headers: {
           Authorization: authHeader,
@@ -149,7 +190,39 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { file_id, job_id }: Body = await req.json();
+    // 3. Check rate limit
+    const rateLimitCheck = checkRateLimit(user.id);
+    if (!rateLimitCheck.allowed) {
+      return new Response(
+        JSON.stringify({ 
+          ok: false, 
+          error: "Rate limit exceeded. Please try again later.",
+          retryAfter: rateLimitCheck.retryAfter 
+        }),
+        { 
+          status: 429, 
+          headers: { 
+            "Content-Type": "application/json",
+            "Retry-After": String(rateLimitCheck.retryAfter || 60)
+          } 
+        }
+      );
+    }
+
+    // 4. Parse and validate request body
+    let body: Body;
+    try {
+      body = await req.json();
+    } catch (e) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Invalid JSON in request body" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const { file_id, job_id } = body;
+    
+    // Validate file_id format (should be a UUID)
     if (!file_id) {
       return new Response(
         JSON.stringify({ ok: false, error: "file_id is missing" }),
@@ -157,7 +230,22 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Verify file ownership
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(file_id)) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Invalid file_id format" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (job_id && !uuidRegex.test(job_id)) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Invalid job_id format" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // 5. Verify file ownership
     const fileRes = await fetch(`${supabaseUrl}/rest/v1/files?id=eq.${file_id}`, { headers });
     const files = await fileRes.json();
     if (!files.length) {
@@ -211,8 +299,20 @@ Deno.serve(async (req) => {
     });
 
     // File metadata already fetched and verified above
-    const fileUrl = fileRow.public_url;
-    const mimeType = fileRow.mime_type || guessMimeType(fileRow.storage_path); // 👈 fallback added
+    // Since the bucket is now private, we need to create a signed URL using service role
+    // Reuse the createSupabaseClient function from earlier
+    const serviceClient = createSupabaseClient(supabaseUrl, serviceKey);
+    
+    const { data: signedData, error: signedError } = await serviceClient.storage
+      .from('study')
+      .createSignedUrl(fileRow.storage_path, 3600); // 1 hour expiry
+    
+    if (signedError || !signedData?.signedUrl) {
+      throw new Error(`Failed to create signed URL for file: ${signedError?.message || 'Unknown error'}`);
+    }
+    
+    const fileUrl = signedData.signedUrl;
+    const mimeType = fileRow.mime_type || guessMimeType(fileRow.storage_path);
 
     // Prompt for MCQ generation
     const prompt = `
@@ -223,9 +323,20 @@ CRITICAL REQUIREMENTS:
 2. Questions must be answerable from MEMORY and COMPREHENSION - users should NOT need to look back at the material
 3. NEVER use words like "text", "document", "passage", "material", "according to", "mentioned", "stated", "explained", "notes", or "discusses" in the question itself
 4. Focus on testing KNOWLEDGE and UNDERSTANDING of the subject matter, not memory of specific wording
-5. Each question must have exactly 4 options
+5. **EVERY SINGLE question MUST have EXACTLY 4 options - NO EXCEPTIONS**
 6. Include "answer_index" (0-based index) for the correct answer
 7. Respond ONLY with a valid JSON array - no markdown, no code blocks, no additional text
+
+FORMAT REQUIREMENT - STRICTLY FOLLOW THIS STRUCTURE:
+[
+  {
+    "question": "Your question here?",
+    "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
+    "answer_index": 0
+  }
+]
+
+IMPORTANT: ALL questions must have EXACTLY 4 options in the "options" array. Questions with 3 or fewer options will be rejected.
 
 QUESTION TYPES TO INCLUDE:
 - Factual knowledge questions (definitions, key facts, numbers, measurements)
@@ -297,8 +408,37 @@ IMPORTANT: Generate questions that test users' understanding and knowledge of th
       throw new Error("Gemini response is not an array: " + geminiRaw);
     }
 
-    // Insert MCQs into DB
-    for (const q of mcqs) {
+    // Validate and filter MCQs - ensure exactly 4 options
+    const validMcqs = mcqs.filter((mcq, index) => {
+      // Check if mcq has required fields
+      if (!mcq.question || !Array.isArray(mcq.options) || typeof mcq.answer_index !== 'number') {
+        console.warn(`MCQ ${index} missing required fields, skipping:`, mcq);
+        return false;
+      }
+      
+      // Check if exactly 4 options
+      if (mcq.options.length !== 4) {
+        console.warn(`MCQ ${index} has ${mcq.options.length} options instead of 4, skipping:`, mcq.question);
+        return false;
+      }
+      
+      // Check if answer_index is valid
+      if (mcq.answer_index < 0 || mcq.answer_index >= mcq.options.length) {
+        console.warn(`MCQ ${index} has invalid answer_index ${mcq.answer_index}, skipping:`, mcq.question);
+        return false;
+      }
+      
+      return true;
+    });
+
+    if (validMcqs.length === 0) {
+      throw new Error("No valid MCQs generated. All MCQs were filtered out due to missing options or invalid format.");
+    }
+
+    console.log(`Generated ${mcqs.length} MCQs, ${validMcqs.length} are valid (with exactly 4 options)`);
+
+    // Insert valid MCQs into DB
+    for (const q of validMcqs) {
       await fetch(`${supabaseUrl}/rest/v1/mcqs`, {
         method: "POST",
         headers,

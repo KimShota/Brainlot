@@ -196,8 +196,15 @@ async function loadImage(){
         }
 
         // 5. Create filename and path (include user_id for security)
-        const fileExt = uri.split(".").pop() ?? "bin";
-        const fileName = `${Date.now()}.${fileExt}`; 
+        const fileExt = uri.split(".").pop()?.toLowerCase() ?? "bin";
+        
+        // Sanitize file extension to prevent path traversal attacks
+        const sanitizedExt = fileExt.replace(/[^a-z0-9]/gi, '').substring(0, 10);
+        if (!sanitizedExt) {
+            throw new Error("Invalid file extension");
+        }
+        
+        const fileName = `${Date.now()}.${sanitizedExt}`; 
         const filePath = `${user.id}/${fileName}`; // Include user_id in path for security
 
 
@@ -211,9 +218,17 @@ async function loadImage(){
         
         if (upErr) throw upErr; 
 
-        const { data: pub } = supabase.storage.from("study").getPublicUrl(filePath); //stores an object that contains url
-        const publicUrl = pub?.publicUrl; //store the public url 
-        if (!publicUrl) throw new Error("Public URL is not created");
+        // Since the bucket is private, we use signed URLs for secure access
+        // Signed URLs expire after a set time (1 hour in this case)
+        const { data: signedData, error: signedError } = await supabase.storage
+            .from("study")
+            .createSignedUrl(filePath, 3600); // 3600 seconds = 1 hour
+        
+        if (signedError || !signedData?.signedUrl) {
+            throw new Error("Failed to create signed URL for file");
+        }
+        
+        const publicUrl = signedData.signedUrl;
 
         //return an object with only the row you inserted the path and url into
         const { data: files, error: fErr } = await supabase 

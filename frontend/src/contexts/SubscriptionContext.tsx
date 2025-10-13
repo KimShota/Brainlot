@@ -151,28 +151,23 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
-  // Mock sync with Supabase
+  // Mock sync with Supabase - FOR DEVELOPMENT ONLY
+  // In production, subscription updates should only be done via RevenueCat webhooks or backend functions
   const syncMockWithSupabase = async (isProSubscribed: boolean) => {
     if (!user) return;
 
     try {
-      // Update Supabase subscription
-      const { error } = await supabase
-        .from('user_subscriptions')
-        .update({
-          plan_type: isProSubscribed ? 'pro' : 'free',
-          status: 'active',
-          revenue_cat_customer_id: `mock_${user.id}`,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', user.id);
-
-      if (error) {
-        console.error('Error syncing subscription:', error);
-      } else {
-        setPlanType(isProSubscribed ? 'pro' : 'free');
-        setSubscriptionStatus('active');
-      }
+      // SECURITY NOTE: In production, users should NOT be able to update their own subscription
+      // This is only for development/testing purposes
+      // Real subscription updates should come from RevenueCat webhooks or admin-only Edge Functions
+      
+      // For now, we just update the local state for testing
+      // In production, remove the database UPDATE and only use Edge Functions with service role
+      setPlanType(isProSubscribed ? 'pro' : 'free');
+      setSubscriptionStatus('active');
+      
+      // Refresh data from database to see actual values
+      await fetchSubscriptionData();
     } catch (error) {
       console.error('Error in syncMockWithSupabase:', error);
     }
@@ -227,26 +222,15 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
   };
 
   // Increment upload count
+  // SECURITY NOTE: Upload count is now managed by database trigger (check_upload_limit)
+  // This function just refreshes the local state from the database
   const incrementUploadCount = async () => {
     if (!user) return;
 
     try {
-      const newCount = uploadCount + 1;
-      
-      const { error } = await supabase
-        .from('user_usage_stats')
-        .update({
-          upload_count: newCount,
-          last_upload_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', user.id);
-
-      if (error) {
-        console.error('Error incrementing upload count:', error);
-      } else {
-        setUploadCount(newCount);
-      }
+      // The upload count is automatically incremented by the database trigger
+      // when a file is uploaded. We just need to refresh our local state.
+      await fetchSubscriptionData();
     } catch (error) {
       console.error('Error in incrementUploadCount:', error);
     }

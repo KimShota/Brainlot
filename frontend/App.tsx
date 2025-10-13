@@ -1,14 +1,22 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
 import AppNavigator from "./AppNavigator";
+import SplashScreen from './src/screens/SplashScreen';
 
 function AppContent() {
   const { loading } = useAuth();
+  const [showSplash, setShowSplash] = useState(true);
 
+  // Show splash screen first
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
+  // Show loading indicator while auth is initializing
   if (loading) {
     return (
       <View style={{ 

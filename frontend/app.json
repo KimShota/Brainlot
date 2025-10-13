@@ -1,29 +1,53 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "Edu-Shorts",
+    "slug": "edu-shorts",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
+    "scheme": "edushorts",
     "userInterfaceStyle": "automatic",
+    "description": "Transform your study materials into interactive MCQs. Upload PDFs and images to generate quizzes and learn on the go with TikTok-style swipeable flashcards.",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f8fdf9"
+    },
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.edushorts.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow Edu-Shorts to access your photo library to upload study materials",
+        "NSCameraUsageDescription": "Allow Edu-Shorts to access your camera to take pictures of study materials"
+      }
     },
     "android": {
+      "package": "com.edushorts.app",
+      "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#58cc02",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "CAMERA"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "your-project-id-here"
+      }
     },
     "plugins": [
       "expo-router",
@@ -33,9 +57,10 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#f8fdf9",
           "dark": {
-            "backgroundColor": "#000000"
+            "image": "./assets/images/splash-icon.png",
+            "backgroundColor": "#1a1f2e"
           }
         }
       ]
@@ -43,6 +68,7 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "owner": "your-expo-username"
   }
 }

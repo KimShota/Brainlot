@@ -2,11 +2,13 @@ import { useState } from "react";
 import { View, Text, Button, Alert, ActivityIndicator, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Modal, Animated } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
+import * as Haptics from 'expo-haptics';
 import { supabase } from "../lib/supabase";
 import { LinearGradient } from "expo-linear-gradient"; 
-import { Ionicons } from '@expo/vector-icons'; 
+import { Ionicons } from '@expo/vector-icons';
+import { useSubscription } from "../contexts/SubscriptionContext"; 
 
-//Color theme 
+//Color theme to match duolingo 
 const colors = {
     background: '#f8fdf9', //light green-tinted background color
     foreground: '#1a1f2e', //deep navy for text 
@@ -17,26 +19,92 @@ const colors = {
     mutedForeground: '#6b7280',
     card: '#ffffff',
     border: '#e8f5e8',
+    destructive: '#dc2626', // Friendly red
+    gold: '#ffd700',
 }
 
 //URL to supabase edge function
 const function_url = "/functions/v1/generate-mcqs"; 
 
+//main function 
 export default function UploadScreen({ navigation }: any ){
     const [loading, setLoading] = useState(false);
-    const [showSuccessModal, setShowSuccessModal] = useState(false); 
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount } = useSubscription();
 
+    // Handle logout session 
+    const handleLogout = async () => {
+        Alert.alert(
+            "Logout",
+            "Are you sure you want to logout?",
+            [
+                { text: "Cancel", style: "cancel" },
+                { 
+                    text: "Logout", 
+                    style: "destructive",
+                    onPress: async () => {
+                        const { error } = await supabase.auth.signOut();
+                        if (error) {
+                            Alert.alert("Error", error.message);
+                        }
+                        // Navigation will be handled by AuthContext
+                    }
+                }
+            ]
+        );
+    }; 
+
+    //fucntion to load pdfs 
     async function loadPdf(){
+        // Haptic feedback on button press
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        
+        // Check upload limit
+        if (!canUpload) {
+            Alert.alert(
+                "Upload Limit Reached",
+                `Free plan allows up to ${uploadLimit} uploads. Upgrade to Pro plan for unlimited access!`,
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { 
+                        text: "View Plans", 
+                        onPress: () => navigation.navigate("Subscription", { source: 'upload' })
+                    }
+                ]
+            );
+            return;
+        }
+
         const result = await DocumentPicker.getDocumentAsync({
             type: ["application/pdf"], 
-            multiple: false, 
+            multiple: false, //change to true if you want multiple pdfs 
             copyToCacheDirectory: true, //stores files into app's cache folder 
         }); 
         if(result.canceled || !result.assets?.[0]) return; 
         await handleUpload(result.assets[0].uri, "application/pdf"); 
     }
 
-    async function loadImage(){
+    //function to load images 
+async function loadImage(){
+        // Haptic feedback on button press
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        
+        // Check upload limit
+        if (!canUpload) {
+            Alert.alert(
+                "Upload Limit Reached",
+                `Free plan allows up to ${uploadLimit} uploads. Upgrade to Pro plan for unlimited access!`,
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { 
+                        text: "View Plans", 
+                        onPress: () => navigation.navigate("Subscription", { source: 'upload' })
+                    }
+                ]
+            );
+            return;
+        }
+
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync(); 
         if (status !== "granted"){
             Alert.alert("Permission Required", "We need media permissions"); 
@@ -79,14 +147,80 @@ export default function UploadScreen({ navigation }: any ){
         try {
             setLoading(true); //set loading state to true 
 
-        //creates a filename and path
-        const fileExt = uri.split(".").pop() ?? "bin"; //take pdf at the last
-        const fileName = `${Date.now()}.${fileExt}`; 
-        const filePath = `upload/${fileName}`; 
+        // 1. Validate MIME type
+        const ALLOWED_MIME_TYPES = [
+            'application/pdf',
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/gif',
+            'image/webp'
+        ];
+        
+        if (!ALLOWED_MIME_TYPES.includes(mime)) {
+            throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
+        }
 
-        const file = await fetch(uri); //ask the server to get the file path data
-        const arrayBuffer = await file.arrayBuffer(); //take the raw bits of filepath
-        const uint8Array = new Uint8Array(arrayBuffer); //makes an array where each element consists of 8 bits
+        // 2. Get current user first
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            throw new Error("User not authenticated. Please log in.");
+        }
+
+        // 3. Load file and validate size
+        const file = await fetch(uri);
+        const arrayBuffer = await file.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        
+        const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+        if (uint8Array.length > MAX_FILE_SIZE) {
+            throw new Error(`File too large. Maximum size is 20MB. Your file is ${(uint8Array.length / 1024 / 1024).toFixed(1)}MB.`);
+        }
+
+        // 4. Delete all previous MCQs and files for this user
+        const { data: previousFiles } = await supabase
+            .from("files")
+            .select("id, storage_path")
+            .eq("user_id", user.id);
+        
+        if (previousFiles && previousFiles.length > 0) {
+            const fileIds = previousFiles.map(f => f.id);
+            
+            // Delete MCQs
+            const { error: deleteMcqError } = await supabase
+                .from("mcqs")
+                .delete()
+                .in("file_id", fileIds);
+            
+            if (deleteMcqError) {
+                console.warn("Failed to delete previous MCQs:", deleteMcqError);
+            }
+            
+            // Delete storage files
+            const storagePaths = previousFiles.map(f => f.storage_path);
+            const { error: deleteStorageError } = await supabase.storage
+                .from("study")
+                .remove(storagePaths);
+            
+            if (deleteStorageError) {
+                console.warn("Failed to delete previous storage files:", deleteStorageError);
+            }
+            
+            // Delete file records
+            const { error: deleteFilesError } = await supabase
+                .from("files")
+                .delete()
+                .in("id", fileIds);
+            
+            if (deleteFilesError) {
+                console.warn("Failed to delete previous file records:", deleteFilesError);
+            }
+        }
+
+        // 5. Create filename and path (include user_id for security)
+        const fileExt = uri.split(".").pop() ?? "bin";
+        const fileName = `${Date.now()}.${fileExt}`; 
+        const filePath = `${user.id}/${fileName}`; // Include user_id in path for security
 
 
         //store the file path into the upload folder inside storage 
@@ -101,7 +235,7 @@ export default function UploadScreen({ navigation }: any ){
 
         const { data: pub } = supabase.storage.from("study").getPublicUrl(filePath); //stores an object that contains url
         const publicUrl = pub?.publicUrl; //store the public url 
-        if (!publicUrl) throw new Error("Public URL is not created"); 
+        if (!publicUrl) throw new Error("Public URL is not created");
 
         //return an object with only the row you inserted the path and url into
         const { data: files, error: fErr } = await supabase 
@@ -110,6 +244,7 @@ export default function UploadScreen({ navigation }: any ){
                 storage_path: filePath, 
                 public_url: publicUrl, 
                 mime_type: mime,
+                user_id: user.id, // Associate file with current user
             }])
             .select()
             .limit(1)
@@ -117,13 +252,20 @@ export default function UploadScreen({ navigation }: any ){
         if (fErr) throw fErr; 
         const fileRow = files![0]; 
 
-        const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!; //get supabase public url 
+        // 6. Get user session token for authentication
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+            throw new Error("No active session. Please log in again.");
+        }
+
+        // 7. Call Edge Function with user token
+        const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
         const fnRes = await fetch(`${baseUrl}${function_url}`, {
             method: "POST", 
             headers: {
                 "Content-Type": "application/json", 
-                apikey:  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!, //anon key (public api key to access database with RLS)
-                Authorization: `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!}`,
+                apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+                Authorization: `Bearer ${session.access_token}`, // Use user's token instead of anon key
             },
             body: JSON.stringify({ file_id: fileRow.id }),
         }); 
@@ -132,23 +274,36 @@ export default function UploadScreen({ navigation }: any ){
             throw new Error(await fnRes.text()); 
         }
 
+        // Increment upload count after successful upload
+        await incrementUploadCount();
+        // Success haptic feedback
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setShowSuccessModal(true);
         } catch (e: any) {
             let errorMessage = e.message ?? String(e);
             
-            // Parse Gemini API errors for better user experience
-            if (errorMessage.includes("503") || errorMessage.includes("UNAVAILABLE")) {
+            // Parse errors for better user experience
+            if (errorMessage.includes("Invalid file type")) {
+                // Keep the original error message
+            } else if (errorMessage.includes("File too large")) {
+                // Keep the original error message
+            } else if (errorMessage.includes("not authenticated") || errorMessage.includes("No active session")) {
+                errorMessage = "Please log in to upload files.";
+            } else if (errorMessage.includes("503") || errorMessage.includes("UNAVAILABLE")) {
                 errorMessage = "The AI service is temporarily unavailable. Please try again in a few minutes.";
             } else if (errorMessage.includes("400") || errorMessage.includes("INVALID_ARGUMENT")) {
                 errorMessage = "The file format is not supported. Please try a different file.";
-            } else if (errorMessage.includes("403") || errorMessage.includes("PERMISSION_DENIED")) {
-                errorMessage = "Access denied. Please check your API configuration.";
-            } else if (errorMessage.includes("File too large")) {
-                errorMessage = "The image file is too large. Please compress it or use a smaller image.";
+            } else if (errorMessage.includes("401") || errorMessage.includes("Unauthorized")) {
+                errorMessage = "Authentication failed. Please log in again.";
+            } else if (errorMessage.includes("403") || errorMessage.includes("Access denied")) {
+                errorMessage = "Access denied. You don't have permission to perform this action.";
             } else if (errorMessage.includes("413") || errorMessage.includes("PAYLOAD_TOO_LARGE")) {
-                errorMessage = "The image file is too large. Please compress it or use a smaller image.";
+                errorMessage = "The file is too large. Please use a smaller file.";
             } else if (errorMessage.includes("429") || errorMessage.includes("QUOTA_EXCEEDED")) {
                 errorMessage = "API quota exceeded. Please try again later.";
+            } else {
+                // Generic error message for unexpected errors
+                errorMessage = "An error occurred during upload. Please try again.";
             }
             
             Alert.alert("Upload Error", errorMessage); 
@@ -161,8 +316,15 @@ export default function UploadScreen({ navigation }: any ){
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
             
-            {/* Header with back button and sparkles */}
+            {/* Header with logout button and sparkles */}
             <View style={styles.header}>
+                <TouchableOpacity 
+                    style={styles.logoutButton}
+                    onPress={handleLogout}
+                    activeOpacity={0.7}
+                >
+                    <Ionicons name="log-out-outline" size={24} color={colors.destructive} />
+                </TouchableOpacity>
                 <Text style={styles.headerTitle}>Edu-Shorts</Text>
                 <Ionicons name="sparkles" size={24} color={colors.secondary} />
             </View>
@@ -178,9 +340,21 @@ export default function UploadScreen({ navigation }: any ){
                         <Ionicons name="scan" size={48} color="white" />
                     </LinearGradient>
                     <Text style={styles.heroTitle}>Upload your materials!</Text>
-                    <Text style={styles.heroSubtitle}>
-                        Choose your materials and let's get started! 🚀
-                    </Text>
+                    
+                    {/* Upload Count Badge */}
+                    {!isProUser && (
+                        <View style={styles.uploadCountBadge}>
+                            <Text style={styles.uploadCountText}>
+                                Remaining: {uploadLimit - uploadCount}/{uploadLimit} uploads
+                            </Text>
+                        </View>
+                    )}
+                    {isProUser && (
+                        <View style={styles.proBadge}>
+                            <Ionicons name="sparkles" size={16} color={colors.secondary} />
+                            <Text style={styles.proBadgeText}>Pro - Unlimited</Text>
+                        </View>
+                    )}
                 </View>
 
                 {/* Upload Cards */}
@@ -254,6 +428,7 @@ export default function UploadScreen({ navigation }: any ){
                         <TouchableOpacity
                             style={styles.practiceButton}
                             onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                                 setShowSuccessModal(false);
                                 navigation.navigate("Feed");
                             }}
@@ -271,6 +446,28 @@ export default function UploadScreen({ navigation }: any ){
                     </View>
                 </View>
             </Modal>
+
+            {/* Shopping Cart Button - Fixed at Bottom */}
+            <View style={styles.bottomCartContainer}>
+                <TouchableOpacity
+                    style={[styles.cartButton, loading && styles.cartButtonDisabled]}
+                    onPress={() => navigation.navigate("Subscription", { source: 'upload' })}
+                    activeOpacity={0.9}
+                    disabled={loading}
+                >
+                    <LinearGradient
+                        colors={[colors.secondary, colors.gold]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.cartButtonGradient}
+                    >
+                        <Ionicons name={loading ? "hourglass" : "cart"} size={24} color="white" />
+                        <Text style={styles.cartButtonText}>
+                            {loading ? 'Processing...' : (isProUser ? 'Manage Plan' : 'Upgrade to Pro')}
+                        </Text>
+                    </LinearGradient>
+                </TouchableOpacity>
+            </View>
         </SafeAreaView>
     ); 
 }
@@ -288,6 +485,13 @@ const styles = StyleSheet.create({
         paddingVertical: 20,
         backgroundColor: `${colors.primary}08`,
     },
+    logoutButton: {
+        padding: 8,
+        borderRadius: 20,
+        backgroundColor: `${colors.destructive}15`,
+        borderWidth: 1,
+        borderColor: `${colors.destructive}30`,
+    },
     backButton: {
         padding: 8,
         borderRadius: 20,
@@ -296,8 +500,9 @@ const styles = StyleSheet.create({
     headerTitle: {
         fontSize: 20,
         fontWeight: 'bold',
-        paddingLeft: 120, //bring the title to the center 
         color: colors.foreground,
+        flex: 1,
+        textAlign: 'center',
     },
     mainContent: {
         flex: 1,
@@ -501,5 +706,73 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
         color: 'white',
+    },
+    uploadCountBadge: {
+        marginTop: 16,
+        backgroundColor: `${colors.secondary}20`,
+        paddingVertical: 8,
+        paddingHorizontal: 20,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: `${colors.secondary}40`,
+    },
+    uploadCountText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: colors.secondary,
+    },
+    proBadge: {
+        marginTop: 16,
+        backgroundColor: `${colors.secondary}20`,
+        paddingVertical: 8,
+        paddingHorizontal: 20,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: `${colors.secondary}40`,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    proBadgeText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: colors.secondary,
+    },
+    bottomCartContainer: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        paddingHorizontal: 24,
+        paddingVertical: 16,
+        paddingBottom: 32,
+        backgroundColor: colors.background,
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+    cartButton: {
+        borderRadius: 16,
+        overflow: 'hidden',
+    },
+    cartButtonDisabled: {
+        opacity: 0.5,
+    },
+    cartButtonGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        gap: 12,
+    },
+    cartButtonText: {
+        color: 'white',
+        fontSize: 18,
+        fontWeight: 'bold',
     },
 });

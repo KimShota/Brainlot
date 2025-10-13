@@ -2,6 +2,7 @@ import { useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native"; 
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 
 type Props = {
     item: {
@@ -34,7 +35,23 @@ type Props = {
 
 export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, colors }: Props) {
     const [selected, setSelected] = useState<number | null>(null);
-    const isAnswered = selected !== null; // check if user already chose answer 
+    const isAnswered = selected !== null; // check if user already chose answer
+
+    // Handle option selection with haptic feedback
+    const handleOptionPress = (optionIndex: number) => {
+        if (isAnswered) return;
+
+        const isCorrect = optionIndex === item.answer_index;
+        
+        // Provide haptic feedback based on correctness
+        if (isCorrect) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } else {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        }
+
+        setSelected(optionIndex);
+    }; 
 
     // Default colors if not provided
     const defaultColors = {
@@ -123,7 +140,10 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
             <View style={styles.header}>
                 <Pressable 
                     style={[styles.backButton, { backgroundColor: theme.card, borderColor: theme.border }]}
-                    onPress={() => navigation?.goBack()}
+                    onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        navigation?.goBack();
+                    }}
                 >
                     <Ionicons name="chevron-back" size={24} color={theme.foreground} />
                 </Pressable>
@@ -132,53 +152,34 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
 
             {/* Main Content - This takes the remaining space */}
             <View style={styles.mainContent}>
-                {/* Question */}
+                {/* Question - Fixed position */}
                 <View style={styles.questionContainer}>
                     <Text style={[styles.questionText, { color: theme.foreground }]}>
                         {item.question}
                     </Text>
-                    
-                    {/* Explanation (shown after answering) */}
-                    {/* {isAnswered && (
-                        <View style={[styles.explanationContainer, { 
-                            backgroundColor: `${theme.accent}1A`, 
-                            borderColor: `${theme.accent}4D` 
-                        }]}>
-                            <View style={styles.explanationHeader}>
-                                <Ionicons name="flash" size={20} color={theme.accent} />
-                                <Text style={[styles.explanationTitle, { color: theme.accent }]}>
-                                    Explanation
-                                </Text>
-                            </View>
-                            <Text style={[styles.explanationText, { color: theme.foreground }]}>
-                                {selected === item.answer_index 
-                                    ? "Great job! You got it right! 🎉" 
-                                    : "Don't worry, keep practicing! The correct answer is highlighted in green. 💪"
-                                }
-                            </Text>
-                        </View>
-                    )} */}
                 </View>
 
-                {/* Options */}
-                <View style={styles.optionsContainer}>
-                    {item.options.map((opt, idx) => {
-                        const optionStyle = getOptionStyle(idx);
-                        const textStyle = getOptionTextStyle(idx);
+                {/* Options - Dynamic spacing with ScrollView for overflow */}
+                <View style={styles.optionsWrapper}>
+                    <View style={styles.optionsContainer}>
+                        {item.options.map((opt, idx) => {
+                            const optionStyle = getOptionStyle(idx);
+                            const textStyle = getOptionTextStyle(idx);
 
-                        return (
-                            <Pressable
-                                key={idx}
-                                onPress={() => !isAnswered && setSelected(idx)}
-                                style={[styles.optionButton, optionStyle]}
-                                disabled={isAnswered}
-                            >
-                                <Text style={[styles.optionText, textStyle]}>
-                                    {opt}
-                                </Text>
-                            </Pressable>
-                        );
-                    })}
+                            return (
+                                <Pressable
+                                    key={idx}
+                                    onPress={() => handleOptionPress(idx)}
+                                    style={[styles.optionButton, optionStyle]}
+                                    disabled={isAnswered}
+                                >
+                                    <Text style={[styles.optionText, textStyle]}>
+                                        {opt}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
                 </View>
             </View>
         </View>
@@ -255,24 +256,26 @@ const styles = StyleSheet.create({
     progressBar: {
         height: '100%',
         width: '60%',
-        borderRadius: 6,
+        borderRadius: 10,
     },
     mainContent: {
-        flex: 1, // This takes all remaining space
-        justifyContent: 'flex-start', // Start from top instead of center
+        flex: 1,
+        justifyContent: 'flex-start', // Start from top
         paddingVertical: 20,
     },
     questionContainer: {
         alignItems: 'center',
-        marginBottom: 60, // Increased margin to push question higher
+        justifyContent: 'center',
+        minHeight: 100, // Minimum height instead of fixed
+        paddingHorizontal: 16,
+        marginBottom: 40, // Increased spacing between question and options
     },
     questionText: {
-        fontSize: 28,
+        fontSize: 18,
         fontWeight: '900',
         textAlign: 'center',
-        lineHeight: 36,
-        marginBottom: 16,
         paddingHorizontal: 8,
+        flexShrink: 1, // Allow text to shrink if needed
     },
     explanationContainer: {
         borderRadius: 16,
@@ -295,22 +298,35 @@ const styles = StyleSheet.create({
         fontSize: 14,
         lineHeight: 20,
     },
+    optionsWrapper: {
+        flex: 1,
+        justifyContent: 'flex-start', // Start from top instead of center
+        paddingBottom: 30, // Increased bottom padding
+        paddingTop: 10, // Add top padding for breathing room
+    },
     optionsContainer: {
-        gap: 30, //gap between each option 
+        gap: 30, // Consistent gap between each option 
+        paddingHorizontal: 8,
     },
     optionButton: {
-        padding: 24, // Slightly reduced padding
+        paddingVertical: 18,
+        paddingHorizontal: 20,
         borderRadius: 16,
         alignItems: 'flex-start',
+        justifyContent: 'center',
+        minHeight: 56, // Minimum height for consistent sizing 
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
-        elevation: 2,
+        elevation: 2, 
     },
     optionText: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        lineHeight: 24,
+        fontSize: 14,
+        fontWeight: '800',
+        lineHeight: 20,
+        textAlign: 'left',
+        flexWrap: 'wrap', // Ensure text wraps
+        width: '100%', // Take full width for proper wrapping
     },
     bottomIndicator: {
         alignItems: 'center',

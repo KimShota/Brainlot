@@ -118,11 +118,60 @@ Deno.serve(async (req) => {
       );
     }
 
+    // 1. Verify Authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Unauthorized: Missing or invalid token" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // 2. Extract and verify user from token
+    const token = authHeader.replace('Bearer ', '');
+    
+    // Create a Supabase client with the user's token for authentication
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const supabaseClient = createClient(supabaseUrl, serviceKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+    });
+
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
+    
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Unauthorized: Invalid token" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const { file_id, job_id }: Body = await req.json();
     if (!file_id) {
       return new Response(
         JSON.stringify({ ok: false, error: "file_id is missing" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // 3. Verify file ownership
+    const fileRes = await fetch(`${supabaseUrl}/rest/v1/files?id=eq.${file_id}`, { headers });
+    const files = await fileRes.json();
+    if (!files.length) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "File not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const fileRow = files[0];
+    if (fileRow.user_id !== user.id) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Unauthorized: Access denied to this file" }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -161,29 +210,59 @@ Deno.serve(async (req) => {
       body: JSON.stringify({ status: "processing" }),
     });
 
-    // Get file metadata
-    const fileRes = await fetch(`${supabaseUrl}/rest/v1/files?id=eq.${file_id}`, { headers });
-    const files = await fileRes.json();
-    if (!files.length) throw new Error("File not found");
-    const fileRow = files[0];
+    // File metadata already fetched and verified above
     const fileUrl = fileRow.public_url;
     const mimeType = fileRow.mime_type || guessMimeType(fileRow.storage_path); // 👈 fallback added
 
     // Prompt for MCQ generation
     const prompt = `
-You are an MCQ generator. Based on the following study material, create 30 multiple-choice questions.
+You are an expert MCQ generator. Create 30 high-quality multiple-choice questions that test users' understanding and knowledge of the concepts, facts, and ideas covered in the study material.
 
-Requirements:
-- Each question must have exactly 4 options.
-- Include "answer_index" (0-based index) for the correct answer.
-- Respond ONLY with a valid JSON array. Do not include any markdown formatting, code blocks, or additional text.
-- Start your response with [ and end with ]
+CRITICAL REQUIREMENTS:
+1. Questions MUST test understanding and knowledge of concepts, facts, and ideas - NOT retrieval of specific text passages
+2. Questions must be answerable from MEMORY and COMPREHENSION - users should NOT need to look back at the material
+3. NEVER use words like "text", "document", "passage", "material", "according to", "mentioned", "stated", "explained", "notes", or "discusses" in the question itself
+4. Focus on testing KNOWLEDGE and UNDERSTANDING of the subject matter, not memory of specific wording
+5. Each question must have exactly 4 options
+6. Include "answer_index" (0-based index) for the correct answer
+7. Respond ONLY with a valid JSON array - no markdown, no code blocks, no additional text
 
-Example format:
-[
-  { "question": "What is...?", "options": ["Option A", "Option B", "Option C", "Option D"], "answer_index": 1 },
-  { "question": "Which of the following...?", "options": ["Choice 1", "Choice 2", "Choice 3", "Choice 4"], "answer_index": 0 }
-]
+QUESTION TYPES TO INCLUDE:
+- Factual knowledge questions (definitions, key facts, numbers, measurements)
+- Conceptual understanding questions (processes, relationships, cause and effect)
+- Application questions (using knowledge to solve problems or make predictions)
+- Analysis questions (comparing, contrasting, identifying patterns)
+- Questions about concepts, theories, formulas, or principles
+- Questions about historical events, people, dates, or facts
+- Questions about scientific processes, chemical reactions, or biological processes
+- Questions about mathematical concepts, equations, or calculations
+
+QUESTION TYPES TO STRICTLY AVOID:
+- ANY questions that reference "text", "document", "passage", "material", "according to", "mentioned", "stated", "explained", "notes", "discusses"
+- Questions asking "what does the image/figure/chart show" or "what is depicted in the image"
+- Questions about document layout, structure, or organization
+- Questions asking "where to find information" or "which page/section"
+- Questions about study tips, learning strategies, or methodology
+- Questions not directly covered in the provided material
+- Questions requiring visual inspection of the material
+- Questions about colors, shapes, or visual characteristics
+- Questions asking users to identify something "in the picture" or "shown in the image"
+
+GOOD EXAMPLES:
+{ "question": "What is the resolving power of a light microscope?", "options": ["0.2 nm", "200 nm", "2 μm", "0.2 μm"], "answer_index": 1 }
+{ "question": "Which process occurs during photosynthesis?", "options": ["Glucose breakdown", "Carbon dioxide absorption", "Protein synthesis", "DNA replication"], "answer_index": 1 }
+{ "question": "What is the chemical formula for water?", "options": ["H2O", "CO2", "NaCl", "O2"], "answer_index": 0 }
+{ "question": "Who was the first African American to serve in the U.S. Senate?", "options": ["Frederick Douglass", "Hiram Revels", "Booker T. Washington", "W.E.B. Du Bois"], "answer_index": 1 }
+{ "question": "What type of sound sources exist besides musical instruments and traffic?", "options": ["Electronic devices", "Natural phenomena", "Human voices", "Animal sounds"], "answer_index": 1 }
+{ "question": "How does the speed of sound change with temperature?", "options": ["Increases by 0.6 m/s per °C", "Decreases by 0.6 m/s per °C", "Remains constant", "Increases by 3.31 m/s per °C"], "answer_index": 0 }
+
+BAD EXAMPLES (DO NOT CREATE THESE):
+{ "question": "The text notes that sound waves are created by vibrations", "options": ["True", "False", "Sometimes", "Never"], "answer_index": 0 }
+{ "question": "According to the text, what is the speed of sound?", "options": ["343 m/s", "300 m/s", "400 m/s", "250 m/s"], "answer_index": 0 }
+{ "question": "What does the text explain about temperature?", "options": ["It affects sound speed", "It doesn't matter", "It's constant", "It varies"], "answer_index": 0 }
+{ "question": "The passage mentions that...", "options": ["Option A", "Option B", "Option C", "Option D"], "answer_index": 0 }
+
+IMPORTANT: Generate questions that test users' understanding and knowledge of the subject matter. Focus on concepts, facts, and ideas that users should know and understand, not on specific wording or references to the source material. Users should be able to answer all questions based on their knowledge and comprehension of the topics covered.
 `;
 
     // Call Gemini
@@ -245,8 +324,15 @@ Example format:
     );
   } catch (e) {
     console.error("Edge function error:", e);
+    
+    // Hide detailed error messages in production
+    const isDevelopment = Deno.env.get("ENVIRONMENT") === "development";
+    const errorMessage = isDevelopment 
+      ? String(e) 
+      : "An unexpected error occurred. Please try again later.";
+    
     return new Response(
-      JSON.stringify({ ok: false, error: String(e) }),
+      JSON.stringify({ ok: false, error: errorMessage }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

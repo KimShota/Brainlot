@@ -1,16 +1,66 @@
-# Welcome to your Expo app 👋
+# Edu-Shorts - MCQ Learning App 📚
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Edu-Shorts is a learning app that automatically generates MCQs (Multiple Choice Questions) from PDFs and images.
 
-## Get started
+## Main Features
 
-1. Install dependencies
+- 📄 **PDF Upload**: Automatically generate MCQs from PDF files
+- 🖼️ **Image Upload**: Generate questions from image files
+- 🎯 **Swipe Learning**: Fun learning with TikTok-style UI
+- 💳 **Subscription**: Free and Pro plans available
+
+### Plan Details
+
+#### Free Plan
+- Price: Free
+- Upload limit: Up to 10 uploads
+- MCQ generation: 300 total (30 × 10 uploads)
+
+#### Pro Plan
+- Price: ¥600/month ($5/month)
+- Upload limit: Unlimited
+- MCQ generation: Unlimited
+- Ad-free
+- Cancel anytime
+
+## Setup
+
+### 1. Install Dependencies
 
    ```bash
    npm install
    ```
 
-2. Start the app
+### 2. Environment Variables
+
+Create a `.env` file and set the following variables:
+
+```bash
+EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+EXPO_PUBLIC_REVENUECAT_API_KEY=your_revenuecat_api_key
+```
+
+### 3. Supabase Setup
+
+1. Create a Supabase project
+2. Run `/backend/supabase/migrations/create_subscription_tables.sql` to create tables
+
+### 4. Payment Feature Setup
+
+#### If you have Apple Developer Program enrollment
+See `SETUP_PAYMENT.md` for details.
+
+#### If you don't have Apple Developer Program enrollment (Development Mode)
+See `DEVELOPMENT_MODE_GUIDE.md` for details.
+
+**Development Mode allows:**
+- ✅ UI/UX testing
+- ✅ Upload limit functionality
+- ✅ Subscription state management
+- ❌ Actual payments (requires Apple Developer Program)
+
+### 5. Start the App
 
    ```bash
    npx expo start

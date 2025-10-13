@@ -30,29 +30,7 @@ const function_url = "/functions/v1/generate-mcqs";
 export default function UploadScreen({ navigation }: any ){
     const [loading, setLoading] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
-    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount } = useSubscription();
-
-    // Handle logout session 
-    const handleLogout = async () => {
-        Alert.alert(
-            "Logout",
-            "Are you sure you want to logout?",
-            [
-                { text: "Cancel", style: "cancel" },
-                { 
-                    text: "Logout", 
-                    style: "destructive",
-                    onPress: async () => {
-                        const { error } = await supabase.auth.signOut();
-                        if (error) {
-                            Alert.alert("Error", error.message);
-                        }
-                        // Navigation will be handled by AuthContext
-                    }
-                }
-            ]
-        );
-    }; 
+    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount } = useSubscription(); 
 
     //fucntion to load pdfs 
     async function loadPdf(){
@@ -161,10 +139,10 @@ async function loadImage(){
             throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
         }
 
-        // 2. Get current user first
+        // 2. Get current user (anonymous user is automatically created)
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-            throw new Error("User not authenticated. Please log in.");
+            throw new Error("Unable to get user session. Please restart the app.");
         }
 
         // 3. Load file and validate size
@@ -255,7 +233,7 @@ async function loadImage(){
         // 6. Get user session token for authentication
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
-            throw new Error("No active session. Please log in again.");
+            throw new Error("No active session. Please restart the app.");
         }
 
         // 7. Call Edge Function with user token
@@ -288,13 +266,13 @@ async function loadImage(){
             } else if (errorMessage.includes("File too large")) {
                 // Keep the original error message
             } else if (errorMessage.includes("not authenticated") || errorMessage.includes("No active session")) {
-                errorMessage = "Please log in to upload files.";
+                errorMessage = "Session error. Please restart the app.";
             } else if (errorMessage.includes("503") || errorMessage.includes("UNAVAILABLE")) {
                 errorMessage = "The AI service is temporarily unavailable. Please try again in a few minutes.";
             } else if (errorMessage.includes("400") || errorMessage.includes("INVALID_ARGUMENT")) {
                 errorMessage = "The file format is not supported. Please try a different file.";
             } else if (errorMessage.includes("401") || errorMessage.includes("Unauthorized")) {
-                errorMessage = "Authentication failed. Please log in again.";
+                errorMessage = "Session error. Please restart the app.";
             } else if (errorMessage.includes("403") || errorMessage.includes("Access denied")) {
                 errorMessage = "Access denied. You don't have permission to perform this action.";
             } else if (errorMessage.includes("413") || errorMessage.includes("PAYLOAD_TOO_LARGE")) {
@@ -316,15 +294,9 @@ async function loadImage(){
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
             
-            {/* Header with logout button and sparkles */}
+            {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity 
-                    style={styles.logoutButton}
-                    onPress={handleLogout}
-                    activeOpacity={0.7}
-                >
-                    <Ionicons name="log-out-outline" size={24} color={colors.destructive} />
-                </TouchableOpacity>
+                <View style={styles.spacer} />
                 <Text style={styles.headerTitle}>Edu-Shorts</Text>
                 <Ionicons name="sparkles" size={24} color={colors.secondary} />
             </View>
@@ -485,17 +457,8 @@ const styles = StyleSheet.create({
         paddingVertical: 20,
         backgroundColor: `${colors.primary}08`,
     },
-    logoutButton: {
-        padding: 8,
-        borderRadius: 20,
-        backgroundColor: `${colors.destructive}15`,
-        borderWidth: 1,
-        borderColor: `${colors.destructive}30`,
-    },
-    backButton: {
-        padding: 8,
-        borderRadius: 20,
-        backgroundColor: `${colors.primary}15`,
+    spacer: {
+        width: 24, // Same width as icon for symmetry
     },
     headerTitle: {
         fontSize: 20,

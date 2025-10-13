@@ -32,10 +32,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    // Get initial session, or create anonymous user if none exists
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) {
+        // No session exists, sign in anonymously
+        const { error } = await supabase.auth.signInAnonymously();
+        if (error) {
+          console.error('Anonymous sign-in error:', error);
+        }
+        // Get the new session after anonymous sign-in
+        const { data: { session: newSession } } = await supabase.auth.getSession();
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
+      } else {
+        setSession(session);
+        setUser(session?.user ?? null);
+      }
       setLoading(false);
     });
 

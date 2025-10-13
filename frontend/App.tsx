@@ -4,11 +4,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
-import AuthScreen from './src/screens/AuthScreen';
 import AppNavigator from "./AppNavigator";
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { loading } = useAuth();
 
   if (loading) {
     return (
@@ -41,10 +40,7 @@ function AppContent() {
     );
   }
 
-  if (!user) {
-    return <AuthScreen />;
-  }
-
+  // Always show AppNavigator - anonymous auth is handled in AuthContext
   return <AppNavigator />;
 }
 

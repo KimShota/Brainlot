@@ -96,7 +96,22 @@ export default function AuthScreen({ navigation }: any) {
             }
         } catch (error: any) { //handle any errors
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', error.message);
+            console.error('Auth error:', error);
+            
+            // More detailed error handling
+            let errorMessage = error.message || 'An unexpected error occurred';
+            
+            if (error.message?.includes('email')) {
+                errorMessage = 'Invalid email address or email already exists';
+            } else if (error.message?.includes('password')) {
+                errorMessage = 'Password must be at least 6 characters';
+            } else if (error.message?.includes('rate limit')) {
+                errorMessage = 'Too many attempts. Please try again later';
+            } else if (error.message?.includes('Database error')) {
+                errorMessage = 'Database error saving new user. Please try again or contact support.';
+            }
+            
+            Alert.alert('Error', errorMessage);
         } finally { //set loading to false
             setLoading(false);
         }

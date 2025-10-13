@@ -341,7 +341,7 @@ async function loadImage(){
                     </LinearGradient>
                     <Text style={styles.heroTitle}>Upload your materials!</Text>
                     
-                    {/* Upload Count Badge */}
+                    {/* This is the upload count badge to indicate the remaining uploads for the free plan */}
                     {!isProUser && (
                         <View style={styles.uploadCountBadge}>
                             <Text style={styles.uploadCountText}>

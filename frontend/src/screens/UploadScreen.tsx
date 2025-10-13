@@ -30,7 +30,29 @@ const function_url = "/functions/v1/generate-mcqs";
 export default function UploadScreen({ navigation }: any ){
     const [loading, setLoading] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
-    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount } = useSubscription(); 
+    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount } = useSubscription();
+
+    // Handle logout session 
+    const handleLogout = async () => {
+        Alert.alert(
+            "Logout",
+            "Are you sure you want to logout?",
+            [
+                { text: "Cancel", style: "cancel" },
+                { 
+                    text: "Logout", 
+                    style: "destructive",
+                    onPress: async () => {
+                        const { error } = await supabase.auth.signOut();
+                        if (error) {
+                            Alert.alert("Error", error.message);
+                        }
+                        // Navigation will be handled by AuthContext
+                    }
+                }
+            ]
+        );
+    }; 
 
     //fucntion to load pdfs 
     async function loadPdf(){
@@ -123,155 +145,159 @@ async function loadImage(){
 
     async function handleUpload(uri: string, mime: string){
         try {
+            console.log("🟢 Step 1: handleUpload started");
             setLoading(true); //set loading state to true 
 
-        // 1. Validate MIME type
-        const ALLOWED_MIME_TYPES = [
-            'application/pdf',
-            'image/jpeg',
-            'image/jpg',
-            'image/png',
-            'image/gif',
-            'image/webp'
-        ];
-        
-        if (!ALLOWED_MIME_TYPES.includes(mime)) {
-            throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
-        }
-
-        // 2. Get current user (anonymous user is automatically created)
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-            throw new Error("Unable to get user session. Please restart the app.");
-        }
-
-        // 3. Load file and validate size
-        const file = await fetch(uri);
-        const arrayBuffer = await file.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-        
-        const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
-        if (uint8Array.length > MAX_FILE_SIZE) {
-            throw new Error(`File too large. Maximum size is 20MB. Your file is ${(uint8Array.length / 1024 / 1024).toFixed(1)}MB.`);
-        }
-
-        // 4. Delete all previous MCQs and files for this user
-        const { data: previousFiles } = await supabase
-            .from("files")
-            .select("id, storage_path")
-            .eq("user_id", user.id);
-        
-        if (previousFiles && previousFiles.length > 0) {
-            const fileIds = previousFiles.map(f => f.id);
+                
+            // 1. Validate MIME type
+            const ALLOWED_MIME_TYPES = [
+                'application/pdf',
+                'image/jpeg',
+                'image/jpg',
+                'image/png',
+                'image/gif',
+                'image/webp'
+            ];
             
-            // Delete MCQs
-            const { error: deleteMcqError } = await supabase
-                .from("mcqs")
-                .delete()
-                .in("file_id", fileIds);
-            
-            if (deleteMcqError) {
-                console.warn("Failed to delete previous MCQs:", deleteMcqError);
+            console.log("🟢 Step 2: validating file type");
+            if (!ALLOWED_MIME_TYPES.includes(mime)) {
+                throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
             }
-            
-            // Delete storage files
-            const storagePaths = previousFiles.map(f => f.storage_path);
-            const { error: deleteStorageError } = await supabase.storage
-                .from("study")
-                .remove(storagePaths);
-            
-            if (deleteStorageError) {
-                console.warn("Failed to delete previous storage files:", deleteStorageError);
+
+            // 2. Get current user first
+            console.log("🟢 Step 3: fetching user");
+            const { data: { user } } = await supabase.auth.getUser();
+            console.log("User:", user); 
+            if (!user) {
+                throw new Error("User not authenticated. Please log in.");
             }
+
+            // 3. Load file and validate size
+            console.log("🟢 Step 4: fetching session");
+            const file = await fetch(uri);
+            const arrayBuffer = await file.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
             
-            // Delete file records
-            const { error: deleteFilesError } = await supabase
+            console.log("🟢 Step 5: validating file size");
+            const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+            if (uint8Array.length > MAX_FILE_SIZE) {
+                throw new Error(`File too large. Maximum size is 20MB. Your file is ${(uint8Array.length / 1024 / 1024).toFixed(1)}MB.`);
+            }
+
+            // 4. Delete all previous MCQs and files for this user
+            console.log("🟢 Step 6: deleting previous files");
+            const { data: previousFiles } = await supabase
                 .from("files")
-                .delete()
-                .in("id", fileIds);
+                .select("id, storage_path")
+                .eq("user_id", user.id);
             
-            if (deleteFilesError) {
-                console.warn("Failed to delete previous file records:", deleteFilesError);
+            console.log("🟢 Step 7: checking for previous files");
+            if (previousFiles && previousFiles.length > 0) {
+                const fileIds = previousFiles.map(f => f.id);
+                
+                // Delete MCQs
+                const { error: deleteMcqError } = await supabase
+                    .from("mcqs")
+                    .delete()
+                    .in("file_id", fileIds);
+                
+                if (deleteMcqError) {
+                    console.warn("Failed to delete previous MCQs:", deleteMcqError);
+                }
+                
+                // Delete storage files
+                const storagePaths = previousFiles.map(f => f.storage_path);
+                const { error: deleteStorageError } = await supabase.storage
+                    .from("study")
+                    .remove(storagePaths);
+                
+                if (deleteStorageError) {
+                    console.warn("Failed to delete previous storage files:", deleteStorageError);
+                }
+                
+                // Delete file records
+                const { error: deleteFilesError } = await supabase
+                    .from("files")
+                    .delete()
+                    .in("id", fileIds);
+                
+                if (deleteFilesError) {
+                    console.warn("Failed to delete previous file records:", deleteFilesError);
+                }
             }
-        }
 
-        // 5. Create filename and path (include user_id for security)
-        const fileExt = uri.split(".").pop()?.toLowerCase() ?? "bin";
-        
-        // Sanitize file extension to prevent path traversal attacks
-        const sanitizedExt = fileExt.replace(/[^a-z0-9]/gi, '').substring(0, 10);
-        if (!sanitizedExt) {
-            throw new Error("Invalid file extension");
-        }
-        
-        const fileName = `${Date.now()}.${sanitizedExt}`; 
-        const filePath = `${user.id}/${fileName}`; // Include user_id in path for security
+            console.log("🟢 Step 8: creating filename and path");
+            // 5. Create filename and path (include user_id for security)
+            const fileExt = uri.split(".").pop() ?? "bin";
+            const fileName = `${Date.now()}.${fileExt}`; 
+            const filePath = `${user.id}/${fileName}`; // Include user_id in path for security
 
+            console.log("🟢 Step 9: storing file path into upload folder");
+            //store the file path into the upload folder inside storage 
+            const { error: upErr } = await supabase.storage 
+                .from("study") //go to the study storage 
+                .upload(filePath, uint8Array, { //inside the upload folder 
+                    contentType: mime, 
+                    upsert: false, //prohibit from overwriting 
+                }); 
+            
+            if (upErr) throw upErr; 
 
-        //store the file path into the upload folder inside storage 
-        const { error: upErr } = await supabase.storage 
-            .from("study") //go to the study storage 
-            .upload(filePath, uint8Array, { //inside the upload folder 
-                contentType: mime, 
-                upsert: false, //prohibit from overwriting 
+            console.log("🟢 Step 10: getting public url");
+            const { data: pub } = supabase.storage.from("study").getPublicUrl(filePath); //stores an object that contains url
+            const publicUrl = pub?.publicUrl; //store the public url 
+            if (!publicUrl) throw new Error("Public URL is not created");
+
+            console.log("🟢 Step 11: inserting file path and url into files table");
+            //return an object with only the row you inserted the path and url into
+            const { data: files, error: fErr } = await supabase 
+                .from("files")
+                .insert([{ 
+                    storage_path: filePath, 
+                    public_url: publicUrl, 
+                    mime_type: mime,
+                    user_id: user.id, // Associate file with current user
+                }])
+                .select()
+                .limit(1)
+
+            if (fErr) throw fErr; 
+            const fileRow = files![0]; 
+
+            // 6. Get user session token for authentication
+            console.warn("🟢 Step 12: getting user session token");
+            const { data: { session } } = await supabase.auth.getSession();
+            console.log("Access Token:", session?.access_token);
+            console.warn("SESSION", session); //log out the JWT sesson token
+            if (!session) {
+                throw new Error("No active session. Please log in again.");
+            }
+
+            // 7. Call Edge Function with user token
+            console.log("🟢 Step 13: calling edge function");
+            const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+            const fnRes = await fetch(`${baseUrl}${function_url}`, {
+                method: "POST", 
+                headers: {
+                    "Content-Type": "application/json", 
+                    apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+                    Authorization: `Bearer ${session.access_token}`, // Use user's token instead of anon key
+                },
+                body: JSON.stringify({ file_id: fileRow.id }), //give the file id to let the server know which file to process
             }); 
-        
-        if (upErr) throw upErr; 
+            console.log("Edge Function URL:", `${baseUrl}${function_url}`);
 
-        // Since the bucket is private, we use signed URLs for secure access
-        // Signed URLs expire after a set time (1 hour in this case)
-        const { data: signedData, error: signedError } = await supabase.storage
-            .from("study")
-            .createSignedUrl(filePath, 3600); // 3600 seconds = 1 hour
-        
-        if (signedError || !signedData?.signedUrl) {
-            throw new Error("Failed to create signed URL for file");
-        }
-        
-        const publicUrl = signedData.signedUrl;
+            console.log(await fnRes.text());
+            if (!fnRes.ok){
+                throw new Error(await fnRes.text()); 
+            }
 
-        //return an object with only the row you inserted the path and url into
-        const { data: files, error: fErr } = await supabase 
-            .from("files")
-            .insert([{ 
-                storage_path: filePath, 
-                public_url: publicUrl, 
-                mime_type: mime,
-                user_id: user.id, // Associate file with current user
-            }])
-            .select()
-            .limit(1)
-
-        if (fErr) throw fErr; 
-        const fileRow = files![0]; 
-
-        // 6. Get user session token for authentication
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-            throw new Error("No active session. Please restart the app.");
-        }
-
-        // 7. Call Edge Function with user token
-        const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-        const fnRes = await fetch(`${baseUrl}${function_url}`, {
-            method: "POST", 
-            headers: {
-                "Content-Type": "application/json", 
-                apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-                Authorization: `Bearer ${session.access_token}`, // Use user's token instead of anon key
-            },
-            body: JSON.stringify({ file_id: fileRow.id }),
-        }); 
-
-        if (!fnRes.ok){
-            throw new Error(await fnRes.text()); 
-        }
-
-        // Increment upload count after successful upload
-        await incrementUploadCount();
-        // Success haptic feedback
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setShowSuccessModal(true);
+            console.log("🟢 Step 14: incrementing upload count");
+            // Increment upload count after successful upload
+            await incrementUploadCount();
+            // Success haptic feedback
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setShowSuccessModal(true);
         } catch (e: any) {
             let errorMessage = e.message ?? String(e);
             
@@ -281,13 +307,13 @@ async function loadImage(){
             } else if (errorMessage.includes("File too large")) {
                 // Keep the original error message
             } else if (errorMessage.includes("not authenticated") || errorMessage.includes("No active session")) {
-                errorMessage = "Session error. Please restart the app.";
+                errorMessage = "Please log in to upload files.";
             } else if (errorMessage.includes("503") || errorMessage.includes("UNAVAILABLE")) {
                 errorMessage = "The AI service is temporarily unavailable. Please try again in a few minutes.";
             } else if (errorMessage.includes("400") || errorMessage.includes("INVALID_ARGUMENT")) {
                 errorMessage = "The file format is not supported. Please try a different file.";
             } else if (errorMessage.includes("401") || errorMessage.includes("Unauthorized")) {
-                errorMessage = "Session error. Please restart the app.";
+                errorMessage = "Authentication failed. Please log in again.";
             } else if (errorMessage.includes("403") || errorMessage.includes("Access denied")) {
                 errorMessage = "Access denied. You don't have permission to perform this action.";
             } else if (errorMessage.includes("413") || errorMessage.includes("PAYLOAD_TOO_LARGE")) {
@@ -309,9 +335,15 @@ async function loadImage(){
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
             
-            {/* Header */}
+            {/* Header with logout button and sparkles */}
             <View style={styles.header}>
-                <View style={styles.spacer} />
+                <TouchableOpacity 
+                    style={styles.logoutButton}
+                    onPress={handleLogout}
+                    activeOpacity={0.7}
+                >
+                    <Ionicons name="log-out-outline" size={24} color={colors.destructive} />
+                </TouchableOpacity>
                 <Text style={styles.headerTitle}>Edu-Shorts</Text>
                 <Ionicons name="sparkles" size={24} color={colors.secondary} />
             </View>
@@ -472,8 +504,17 @@ const styles = StyleSheet.create({
         paddingVertical: 20,
         backgroundColor: `${colors.primary}08`,
     },
-    spacer: {
-        width: 24, // Same width as icon for symmetry
+    logoutButton: {
+        padding: 8,
+        borderRadius: 20,
+        backgroundColor: `${colors.destructive}15`,
+        borderWidth: 1,
+        borderColor: `${colors.destructive}30`,
+    },
+    backButton: {
+        padding: 8,
+        borderRadius: 20,
+        backgroundColor: `${colors.primary}15`,
     },
     headerTitle: {
         fontSize: 20,

@@ -78,7 +78,7 @@ export default function AuthScreen({ navigation }: any) {
         setLoading(true);
         try {
             if (isSignUp) { //if user is sigining up
-                const { error } = await supabase.auth.signUp({
+                const { error } = await supabase.auth.signUp({ //creates the user id and JWT token
                     email,
                     password,
                 });
@@ -96,22 +96,7 @@ export default function AuthScreen({ navigation }: any) {
             }
         } catch (error: any) { //handle any errors
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            console.error('Auth error:', error);
-            
-            // More detailed error handling
-            let errorMessage = error.message || 'An unexpected error occurred';
-            
-            if (error.message?.includes('email')) {
-                errorMessage = 'Invalid email address or email already exists';
-            } else if (error.message?.includes('password')) {
-                errorMessage = 'Password must be at least 6 characters';
-            } else if (error.message?.includes('rate limit')) {
-                errorMessage = 'Too many attempts. Please try again later';
-            } else if (error.message?.includes('Database error')) {
-                errorMessage = 'Database error saving new user. Please try again or contact support.';
-            }
-            
-            Alert.alert('Error', errorMessage);
+            Alert.alert('Error', error.message);
         } finally { //set loading to false
             setLoading(false);
         }

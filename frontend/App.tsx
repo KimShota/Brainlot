@@ -1,22 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
+import AuthScreen from './src/screens/AuthScreen';
 import AppNavigator from "./AppNavigator";
-import SplashScreen from './src/screens/SplashScreen';
+import { supabase } from './src/lib/supabase';
 
 function AppContent() {
-  const { loading } = useAuth();
-  const [showSplash, setShowSplash] = useState(true);
+  const { user, loading } = useAuth();
 
-  // Show splash screen first
-  if (showSplash) {
-    return <SplashScreen onFinish={() => setShowSplash(false)} />;
-  }
-
-  // Show loading indicator while auth is initializing
   if (loading) {
     return (
       <View style={{ 
@@ -48,11 +42,26 @@ function AppContent() {
     );
   }
 
-  // Always show AppNavigator - anonymous auth is handled in AuthContext
+  if (!user) {
+    return <AuthScreen />;
+  }
+
   return <AppNavigator />;
 }
 
 export default function App() {
+  useEffect(() => {
+    const clearOldSession = async () => {
+      try {
+        await supabase.auth.signOut(); 
+        console.log("Old Supabase session cleared — please sign in again.");
+      } catch (error) {
+        console.error("Error clearing old session:", error);
+      }
+    }; 
+    clearOldSession(); 
+  }, []); 
+
   return (
     <AuthProvider>
       <SubscriptionProvider>

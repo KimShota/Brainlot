@@ -32,23 +32,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session, or create anonymous user if none exists
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) {
-        // No session exists, sign in anonymously
-        const { error } = await supabase.auth.signInAnonymously();
-        if (error) {
-          console.error('Anonymous sign-in error:', error);
-        }
-        // Get the new session after anonymous sign-in
-        const { data: { session: newSession } } = await supabase.auth.getSession();
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
-      } else {
-        setSession(session);
-        setUser(session?.user ?? null);
-      }
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
       setLoading(false);
+
+      if (!session){
+        console.warn("No session active - redirect to login"); 
+      } else {
+        console.log("Logged in as: ", session.user.id); 
+        console.log("JWT: ", session.access_token); 
+      }
     });
 
     // Listen for auth changes
@@ -58,6 +53,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+
+      if (session){
+        console.log("Session updated: ", session.user.id); 
+      } else {
+        console.log("User signed out"); 
+      }
     });
 
     return () => subscription.unsubscribe();

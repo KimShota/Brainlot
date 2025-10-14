@@ -44,7 +44,7 @@ export default function AuthScreen({ navigation }: any) {
         return emailRegex.test(email);
     };
 
-    // Password validation function
+    //Function to validate the password to be at least 6 characters
     const validatePassword = (password: string): string | null => {
         if (password.length < 6) {
             return 'Password must be at least 6 characters';

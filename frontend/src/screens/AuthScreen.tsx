@@ -52,6 +52,28 @@ export default function AuthScreen({ navigation }: any) {
         return null;
     };
 
+    //resend the confirmation email  
+    const resendConfirmationEmail = async (email: string) => {
+        try {
+            const { error } = await supabase.auth.resend({
+                type: 'signup', 
+                email, 
+            }); 
+
+            if (error) throw error; 
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Alert.alert(
+                'Verification Email Sent', 
+                'A new confirmation email has been sent to your email address. Please open it and let the page load completely.'
+            ); 
+        } catch (error: any){
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            Alert.alert('Error', error.message);
+        }
+    }; 
+
+
     const handleAuth = async () => {
         // Haptic feedback on button press
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -96,7 +118,19 @@ export default function AuthScreen({ navigation }: any) {
             }
         } catch (error: any) { //handle any errors
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', error.message);
+
+            if (error.message?.toLowerCase().includes('email not confirmed')){
+                Alert.alert(
+                    'Email Not Verified', 
+                    'Your email has not been verified yet. Would you like to resend the verification email?', 
+                    [
+                        { text: 'Cancel', style: 'cancel'}, 
+                        { text: 'Resend', onPress: () => resendConfirmationEmail(email) }, 
+                    ]
+                ); 
+            } else {
+                Alert.alert('Error', error.message);
+            }
         } finally { //set loading to false
             setLoading(false);
         }

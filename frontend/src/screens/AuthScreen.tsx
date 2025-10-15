@@ -52,15 +52,25 @@ export default function AuthScreen({ navigation }: any) {
         return null;
     };
 
-    //resend the confirmation email  
+    //resend the confirmation email using Edge Function
     const resendConfirmationEmail = async (email: string) => {
         try {
-            const { error } = await supabase.auth.resend({
-                type: 'signup', 
-                email, 
-            }); 
+            // Call the resend-confirmation Edge Function without authentication
+            const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!, 
+                    'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!}`,
+                },
+                body: JSON.stringify({ email }),
+            });
 
-            if (error) throw error; 
+            const result = await response.json();
+
+            if (!result.ok) {
+                throw new Error(result.error || 'Failed to resend confirmation email');
+            }
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             Alert.alert(
@@ -73,7 +83,7 @@ export default function AuthScreen({ navigation }: any) {
         }
     }; 
 
-
+    //function to handle authentication 
     const handleAuth = async () => {
         // Haptic feedback on button press
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

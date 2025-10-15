@@ -149,7 +149,7 @@ async function loadImage(){
             setLoading(true); //set loading state to true 
 
                 
-            // 1. Validate MIME type
+            //List of allowed mime types 
             const ALLOWED_MIME_TYPES = [
                 'application/pdf',
                 'image/jpeg',

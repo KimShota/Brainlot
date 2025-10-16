@@ -109,7 +109,7 @@ export default function AuthScreen({ navigation }: any) {
         }
     }; 
 
-    // OAuth: Continue with Google
+    //async function to handle google sign in 
     const handleGoogleSignIn = async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setLoading(true);
@@ -142,6 +142,10 @@ export default function AuthScreen({ navigation }: any) {
                             access_token: accessToken,
                             refresh_token: refreshToken,
                         });
+                        
+                        // Navigate to Upload screen after successful Google sign-in
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        navigation.navigate('Upload');
                     }
                 }
             }
@@ -186,6 +190,10 @@ export default function AuthScreen({ navigation }: any) {
                             access_token: accessToken,
                             refresh_token: refreshToken,
                         });
+                        
+                        // Navigate to Upload screen after successful Apple sign-in
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        navigation.navigate('Upload');
                     }
                 }
             }
@@ -201,25 +209,46 @@ export default function AuthScreen({ navigation }: any) {
     const handlePasswordReset = async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
+        //handle empty email 
         if (!resetEmail) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert('Error', 'Please enter your email address');
             return;
         }
 
+        //handle invalid email 
         if (!validateEmail(resetEmail)) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert('Error', 'Please enter a valid email address');
             return;
         }
 
+        //set resetloading to true 
         setResetLoading(true);
         try {
-            const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-                redirectTo: Linking.createURL('/'),
-            });
+            // const redirectTo = 'edushorts://update-password'; this is for custom dev build 
+            // const redirectTo = Linking.createURL('/update-password'); 
+            // const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, { redirectTo }); 
 
-            if (error) throw error;
+            // if (error) throw error;
+
+            const response = await fetch (
+                `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-password-reset`,
+                {
+                    method: 'POST', 
+                    headers: {
+                        'Content-Type': 'application/json', 
+                        'apikey': process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+                        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!}`,
+                    }, 
+                    body: JSON.stringify({ email: resetEmail }),
+                }
+            ); 
+
+            const result = await response.json(); 
+            if (!response.ok || !result.ok){
+                throw new Error(result.error || 'Failed to send reset password email'); 
+            }
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             Alert.alert(

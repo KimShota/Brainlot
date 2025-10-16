@@ -7,6 +7,18 @@ import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
 import AuthScreen from './src/screens/AuthScreen';
 import AppNavigator from "./AppNavigator";
 import { supabase } from './src/lib/supabase';
+import * as Linking from 'expo-linking'; 
+import { NavigationContainer } from '@react-navigation/native';
+
+const prefix = Linking.createURL('/'); 
+const linking = {
+  prefixes: ['edushorts://', prefix], 
+  config: {
+    screens: {
+      UpdatePassword: 'update-password', 
+    },
+  },
+}; 
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -65,7 +77,9 @@ export default function App() {
   return (
     <AuthProvider>
       <SubscriptionProvider>
-        <AppContent />
+        <NavigationContainer linking={linking}>
+          <AppContent />
+        </NavigationContainer>
       </SubscriptionProvider>
     </AuthProvider>
   );

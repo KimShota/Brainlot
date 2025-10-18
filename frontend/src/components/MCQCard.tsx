@@ -34,20 +34,22 @@ type Props = {
         destructive: string;
     };
     showSwipeHint?: boolean;
-    onAnswered?: (isCorrect: boolean) => void;
+    onAnswered?: (isCorrect: boolean, selectedAnswer: number) => void;
     currentQuestion?: number;
     totalQuestions?: number;
     correctAnswers?: number;
     isAnswered?: boolean;
+    userAnswer?: number; // User's previous answer for review mode
 }; 
 
-export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, colors, showSwipeHint = false, onAnswered, currentQuestion = 0, totalQuestions = 0, correctAnswers = 0, isAnswered: isQuestionAnswered = false }: Props) {
-    const [selected, setSelected] = useState<number | null>(null);
+export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, colors, showSwipeHint = false, onAnswered, currentQuestion = 0, totalQuestions = 0, correctAnswers = 0, isAnswered: isQuestionAnswered = false, userAnswer }: Props) {
+    const [selected, setSelected] = useState<number | null>(userAnswer || null);
     const isAnswered = selected !== null || isQuestionAnswered; //check if the user has already chosen an answer or if question is already answered
+    const isReviewMode = userAnswer !== undefined; // Check if we're in review mode
 
     // Handle option selection with haptic feedback
     const handleOptionPress = (optionIndex: number) => {
-        if (isAnswered) return; //return if user already answered 
+        if (isAnswered || isReviewMode) return; //return if user already answered or in review mode
 
         const isCorrect = optionIndex === item.correct_answer; //check if the chosen option is correct
         
@@ -62,7 +64,7 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
         
         // Call the onAnswered callback if provided and question is not already answered
         if (onAnswered && !isQuestionAnswered) {
-            onAnswered(isCorrect);
+            onAnswered(isCorrect, optionIndex);
         }
     }; 
 
@@ -86,6 +88,7 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
     const getOptionStyle = (optionIndex: number) => {
         const correct = optionIndex === item.correct_answer; //correct option 
         const picked = optionIndex === selected; //chosen option 
+        const userPicked = optionIndex === userAnswer; //user's previous answer
 
         //Default color if not chosen yet
         if (!isAnswered) {
@@ -106,12 +109,22 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
             };
         }
 
-        //Make the button red when it is incorrect
+        //Make the button red when it is incorrect (user's wrong answer)
         if (picked && !correct) {
             return {
                 backgroundColor: theme.destructive,
                 borderColor: theme.destructive,
                 borderWidth: 2,
+            };
+        }
+
+        // In review mode, show user's wrong answer with different styling
+        if (isReviewMode && userPicked && !correct) {
+            return {
+                backgroundColor: theme.destructive,
+                borderColor: theme.destructive,
+                borderWidth: 2,
+                opacity: 0.8,
             };
         }
 
@@ -128,6 +141,7 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
     const getOptionTextStyle = (optionIndex: number) => {
         const correct = optionIndex === item.correct_answer; //correct option 
         const picked = optionIndex === selected; //chosen option 
+        const userPicked = optionIndex === userAnswer; //user's previous answer
 
         //Default text color when user hasn't chosen options yet 
         if (!isAnswered) {
@@ -136,6 +150,11 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
 
         //Make the text white when the option is correct or incorrect
         if (correct || (picked && !correct)) {
+            return { color: '#ffffff' };
+        }
+
+        // In review mode, show user's wrong answer text in white
+        if (isReviewMode && userPicked && !correct) {
             return { color: '#ffffff' };
         }
 
@@ -205,7 +224,7 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
                                     key={idx}
                                     onPress={() => handleOptionPress(idx)}
                                     style={[styles.optionButton, optionStyle]}
-                                    disabled={isAnswered}
+                                    disabled={isAnswered || isReviewMode}
                                 >
                                     <Text style={[styles.optionText, textStyle]}>
                                         {opt}

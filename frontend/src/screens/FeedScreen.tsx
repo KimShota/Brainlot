@@ -53,6 +53,7 @@ export default function FeedScreen({ navigation }: any) {
     const [currentQuestion, setCurrentQuestion] = useState(0); // track current question number
     const [correctAnswers, setCorrectAnswers] = useState(0); // track correct answers count
     const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set()); // track answered question IDs 
+    const [userAnswers, setUserAnswers] = useState<Map<string, number>>(new Map()); // Store user's answers 
     
     // load function to fetch MCQs from the database 
     const load = useCallback(async () => {
@@ -107,6 +108,7 @@ export default function FeedScreen({ navigation }: any) {
             setCurrentQuestion(0);
             setCorrectAnswers(0);
             setAnsweredQuestions(new Set()); // Reset answered questions
+            setUserAnswers(new Map()); // Reset user answers
         }
     }, [items.length]); 
 
@@ -129,7 +131,8 @@ export default function FeedScreen({ navigation }: any) {
                 totalQuestions={items.length}
                 correctAnswers={correctAnswers}
                 isAnswered={answeredQuestions.has(item.id)} // Pass answered status
-                onAnswered={(isCorrect: boolean) => {
+                userAnswer={userAnswers.get(item.id)} // Pass user's previous answer for review mode
+                onAnswered={(isCorrect: boolean, selectedAnswer: number) => {
                     // Check if this question has already been answered
                     if (answeredQuestions.has(item.id)) {
                         return; // Don't process if already answered
@@ -137,6 +140,9 @@ export default function FeedScreen({ navigation }: any) {
                     
                     // Mark this question as answered
                     setAnsweredQuestions(prev => new Set(prev).add(item.id));
+                    
+                    // Store user's answer
+                    setUserAnswers(prev => new Map(prev).set(item.id, selectedAnswer));
                     
                     if (index === 0) {
                         setShowSwipeHint(true);
@@ -152,7 +158,7 @@ export default function FeedScreen({ navigation }: any) {
                 }}
             />
         ), 
-        [ITEM_HEIGHT, navigation, insets, showSwipeHint, currentQuestion, items.length, correctAnswers, answeredQuestions]
+        [ITEM_HEIGHT, navigation, insets, colors, showSwipeHint, currentQuestion, items.length, correctAnswers, answeredQuestions, userAnswers]
     );
 
     // Empty state component

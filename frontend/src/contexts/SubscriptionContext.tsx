@@ -41,6 +41,11 @@ interface SubscriptionContextType {
   incrementUploadCount: () => Promise<void>;
   refreshSubscription: () => Promise<void>;
   unsubscribeFromPro: () => Promise<void>;
+  // Rate limiting for Pro users
+  canUploadNow: boolean;
+  uploadsInLastHour: number;
+  uploadsInLastDay: number;
+  nextUploadAllowedAt: Date | null;
 }
 
 const SubscriptionContext = createContext<SubscriptionContextType>({
@@ -57,6 +62,11 @@ const SubscriptionContext = createContext<SubscriptionContextType>({
   incrementUploadCount: async () => {},
   refreshSubscription: async () => {},
   unsubscribeFromPro: async () => {},
+  // Rate limiting defaults
+  canUploadNow: true,
+  uploadsInLastHour: 0,
+  uploadsInLastDay: 0,
+  nextUploadAllowedAt: null,
 });
 
 export const useSubscription = () => {
@@ -74,10 +84,102 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [uploadCount, setUploadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [offerings, setOfferings] = useState<MockOffering | null>(null);
+  
+  // Rate limiting state
+  const [uploadsInLastHour, setUploadsInLastHour] = useState(0);
+  const [uploadsInLastDay, setUploadsInLastDay] = useState(0);
+  const [nextUploadAllowedAt, setNextUploadAllowedAt] = useState<Date | null>(null);
+  const [recentUploads, setRecentUploads] = useState<Date[]>([]);
 
   const uploadLimit = planType === 'pro' ? Infinity : 10;
   const isProUser = planType === 'pro' && subscriptionStatus === 'active';
   const canUpload = isProUser || uploadCount < uploadLimit;
+
+  // Rate limiting configuration
+  const RATE_LIMITS = {
+    PRO_HOURLY_LIMIT: 20, // Pro users can upload 20 files per hour
+    PRO_DAILY_LIMIT: 100, // Pro users can upload 100 files per day
+    PRO_MIN_INTERVAL: 30, // Minimum 30 seconds between uploads for Pro users
+  };
+
+  // Pure helper function to calculate rate limit values (no state updates)
+  const getRateLimitValues = (uploads: Date[], isPro: boolean) => {
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    // Count uploads in the last hour and day
+    const uploadsInHour = uploads.filter(date => date > oneHourAgo).length;
+    const uploadsInDay = uploads.filter(date => date > oneDayAgo).length;
+
+    // Check if user can upload now
+    let canUploadNow = true;
+    let nextAllowedAt: Date | null = null;
+
+    if (isPro) {
+      // Check hourly limit
+      if (uploadsInHour >= RATE_LIMITS.PRO_HOURLY_LIMIT) {
+        canUploadNow = false;
+        const oldestUploadInHour = uploads
+          .filter(date => date > oneHourAgo)
+          .sort((a, b) => a.getTime() - b.getTime())[0];
+        if (oldestUploadInHour) {
+          nextAllowedAt = new Date(oldestUploadInHour.getTime() + 60 * 60 * 1000);
+        }
+      }
+
+      // Check daily limit
+      if (uploadsInDay >= RATE_LIMITS.PRO_DAILY_LIMIT) {
+        canUploadNow = false;
+        const oldestUploadInDay = uploads
+          .filter(date => date > oneDayAgo)
+          .sort((a, b) => a.getTime() - b.getTime())[0];
+        if (oldestUploadInDay) {
+          nextAllowedAt = new Date(oldestUploadInDay.getTime() + 24 * 60 * 60 * 1000);
+        }
+      }
+
+      // Check minimum interval
+      if (uploads.length > 0) {
+        const lastUpload = uploads[uploads.length - 1];
+        const timeSinceLastUpload = now.getTime() - lastUpload.getTime();
+        if (timeSinceLastUpload < RATE_LIMITS.PRO_MIN_INTERVAL * 1000) {
+          canUploadNow = false;
+          nextAllowedAt = new Date(lastUpload.getTime() + RATE_LIMITS.PRO_MIN_INTERVAL * 1000);
+        }
+      }
+    }
+
+    return {
+      uploadsInHour,
+      uploadsInDay,
+      canUploadNow,
+      nextAllowedAt,
+    };
+  };
+
+  // Update rate limits whenever recentUploads changes
+  useEffect(() => {
+    const rateLimitValues = getRateLimitValues(recentUploads, isProUser);
+    setUploadsInLastHour(rateLimitValues.uploadsInHour);
+    setUploadsInLastDay(rateLimitValues.uploadsInDay);
+    setNextUploadAllowedAt(rateLimitValues.nextAllowedAt);
+
+    // Set up a timer to update rate limits when nextAllowedAt time passes
+    if (rateLimitValues.nextAllowedAt) {
+      const now = new Date();
+      const timeUntilNext = rateLimitValues.nextAllowedAt.getTime() - now.getTime();
+      
+      if (timeUntilNext > 0) {
+        const timer = setTimeout(() => {
+          // Trigger a re-calculation by updating a dummy state
+          setRecentUploads(prev => [...prev]);
+        }, timeUntilNext);
+        
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [recentUploads, isProUser]);
 
   // Mock RevenueCat initialization
   useEffect(() => {
@@ -231,12 +333,22 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
-  // Increment upload count
+  // Increment upload count with rate limiting
   const incrementUploadCount = async () => {
     if (!user) return;
 
+    // Check rate limits for Pro users using the pure helper function
+    const rateLimitValues = getRateLimitValues(recentUploads, isProUser);
+    if (isProUser && !rateLimitValues.canUploadNow) {
+      throw new Error('Rate limit exceeded. Please wait before uploading again.');
+    }
+
     try {
       const newCount = uploadCount + 1;
+      
+      // Add current upload to recent uploads for rate limiting
+      const now = new Date();
+      setRecentUploads(prev => [...prev, now]);
       
       const { error } = await supabase
         .from('user_usage_stats')
@@ -254,6 +366,7 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     } catch (error) {
       console.error('Error in incrementUploadCount:', error);
+      throw error;
     }
   };
 
@@ -317,6 +430,11 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         incrementUploadCount,
         refreshSubscription,
         unsubscribeFromPro,
+        // Rate limiting values - derive canUploadNow from state instead of calling function
+        canUploadNow: isProUser ? (nextUploadAllowedAt === null || nextUploadAllowedAt <= new Date()) : true,
+        uploadsInLastHour,
+        uploadsInLastDay,
+        nextUploadAllowedAt,
       }}
     >
       {children}

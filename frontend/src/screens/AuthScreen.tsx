@@ -42,27 +42,6 @@ export default function AuthScreen({ navigation }: any) {
     const [isSignUp, setIsSignUp] = useState(false);
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
-    const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
-    const [resetEmail, setResetEmail] = useState('');
-    const [resetLoading, setResetLoading] = useState(false);
-    const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
-    const [newPassword, setNewPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [showNewPassword, setShowNewPassword] = useState(false);
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-    // Check for password recovery event
-    useEffect(() => {
-        const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-            if (event === 'PASSWORD_RECOVERY') {
-                setIsPasswordRecovery(true);
-            }
-        });
-
-        return () => {
-            authListener.subscription.unsubscribe();
-        };
-    }, []);
 
     // Email validation function
     const validateEmail = (email: string): boolean => {
@@ -81,6 +60,9 @@ export default function AuthScreen({ navigation }: any) {
     //resend the confirmation email using Edge Function
     const resendConfirmationEmail = async (email: string) => {
         try {
+            console.log('Attempting to resend confirmation email to:', email);
+            console.log('Using Edge Function URL:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`);
+            
             // Call the resend-confirmation Edge Function without authentication
             const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`, {
                 method: 'POST',
@@ -92,20 +74,23 @@ export default function AuthScreen({ navigation }: any) {
                 body: JSON.stringify({ email }),
             });
 
+            console.log('Edge Function response status:', response.status);
             const result = await response.json();
+            console.log('Edge Function response:', result);
 
-            if (!result.ok) {
+            if (!response.ok || !result.ok) {
                 throw new Error(result.error || 'Failed to resend confirmation email');
             }
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             Alert.alert(
                 'Verification Email Sent', 
-                'A new confirmation email has been sent to your email address. Please open it and let the page load completely.'
+                'A new confirmation email has been sent to your email address. Please check your inbox and spam folder.'
             ); 
         } catch (error: any){
+            console.error('Resend confirmation email error:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', error.message);
+            Alert.alert('Error', error.message || 'Failed to resend confirmation email');
         }
     }; 
 
@@ -115,37 +100,45 @@ export default function AuthScreen({ navigation }: any) {
         setLoading(true);
         try {
             const redirectTo = Linking.createURL('/');
+            //return the URL of the login page of Google OAuth
+            console.log("Redirect URL is:", redirectTo);
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
-                    redirectTo,
-                    skipBrowserRedirect: false,
+                    redirectTo, //deep link to stay users on the app after they have successfully logged in 
+                    skipBrowserRedirect: false, //open the browser automatically for user to sign in
                 },
             });
             
-            if (error) throw error;
+            if (error) throw error; //throw error if there is an error
             
+            //If the URL of the login page is returned,
             if (data?.url) {
+
+                //open the in-app browser to sign in with google and close it automatically after they signed in
                 const result = await WebBrowser.openAuthSessionAsync(
-                    data.url,
-                    redirectTo
+                    data.url, 
+                    redirectTo //deep link to stay users on the app after they have successfully logged in 
                 );
                 
+                //If the browser is closed due to the redirect of the deep link, 
                 if (result.type === 'success') {
-                    const url = result.url;
+                    const url = result.url; //deep link URL to stay inside the app 
+                    //extract the access token and refresh token from the deep link URL 
                     const params = new URLSearchParams(url.split('#')[1] || url.split('?')[1]);
                     const accessToken = params.get('access_token');
                     const refreshToken = params.get('refresh_token');
                     
+                    //If they both exist, 
                     if (accessToken && refreshToken) {
+                        //store them in memory securely, mark the users as authenticated, and then use them to make authenticated requests to the backend
                         await supabase.auth.setSession({
                             access_token: accessToken,
                             refresh_token: refreshToken,
                         });
                         
-                        // Navigate to Upload screen after successful Google sign-in
+                        // Navigation will be handled by AuthContext automatically
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                        navigation.navigate('Upload');
                     }
                 }
             }
@@ -162,7 +155,7 @@ export default function AuthScreen({ navigation }: any) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setLoading(true);
         try {
-            const redirectTo = Linking.createURL('/');
+            const redirectTo = Linking.createURL('/'); //this probably contains confirmation URL
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'apple',
                 options: {
@@ -191,9 +184,8 @@ export default function AuthScreen({ navigation }: any) {
                             refresh_token: refreshToken,
                         });
                         
-                        // Navigate to Upload screen after successful Apple sign-in
+                        // Navigation will be handled by AuthContext automatically
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                        navigation.navigate('Upload');
                     }
                 }
             }
@@ -205,128 +197,7 @@ export default function AuthScreen({ navigation }: any) {
         }
     };
 
-    // Handle password reset request
-    const handlePasswordReset = async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        
-        //handle empty email 
-        if (!resetEmail) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', 'Please enter your email address');
-            return;
-        }
 
-        //handle invalid email 
-        if (!validateEmail(resetEmail)) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', 'Please enter a valid email address');
-            return;
-        }
-
-        //set resetloading to true 
-        setResetLoading(true);
-        try {
-            // const redirectTo = 'edushorts://update-password'; this is for custom dev build 
-            // const redirectTo = Linking.createURL('/update-password'); 
-            // const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, { redirectTo }); 
-
-            // if (error) throw error;
-
-            const response = await fetch (
-                `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-password-reset`,
-                {
-                    method: 'POST', 
-                    headers: {
-                        'Content-Type': 'application/json', 
-                        'apikey': process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-                        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!}`,
-                    }, 
-                    body: JSON.stringify({ email: resetEmail }),
-                }
-            ); 
-
-            const result = await response.json(); 
-            if (!response.ok || !result.ok){
-                throw new Error(result.error || 'Failed to send reset password email'); 
-            }
-
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            Alert.alert(
-                'Reset Email Sent',
-                'Check your email for a password reset link. Please open the link and let the page load completely.',
-                [
-                    {
-                        text: 'OK',
-                        onPress: () => {
-                            setShowForgotPasswordModal(false);
-                            setResetEmail('');
-                        }
-                    }
-                ]
-            );
-        } catch (error: any) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', error.message);
-        } finally {
-            setResetLoading(false);
-        }
-    };
-
-    // Handle setting new password after password reset
-    const handleSetNewPassword = async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-        if (!newPassword || !confirmPassword) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', 'Please fill in all fields');
-            return;
-        }
-
-        const passwordError = validatePassword(newPassword);
-        if (passwordError) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', passwordError);
-            return;
-        }
-
-        if (newPassword !== confirmPassword) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', 'Passwords do not match');
-            return;
-        }
-
-        setLoading(true);
-        try {
-            const { error } = await supabase.auth.updateUser({
-                password: newPassword
-            });
-
-            if (error) throw error;
-
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            Alert.alert(
-                'Password Reset Successful',
-                'Your password has been reset successfully. You can now sign in with your new password.',
-                [
-                    {
-                        text: 'OK',
-                        onPress: () => {
-                            setIsPasswordRecovery(false);
-                            setNewPassword('');
-                            setConfirmPassword('');
-                            // Sign out to force re-login with new password
-                            supabase.auth.signOut();
-                        }
-                    }
-                ]
-            );
-        } catch (error: any) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', error.message);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     //function to handle authentication 
     const handleAuth = async () => {
@@ -355,23 +226,69 @@ export default function AuthScreen({ navigation }: any) {
         setLoading(true);
         try {
             if (isSignUp) { //if user is sigining up
-                const { error } = await supabase.auth.signUp({ //creates the user id and JWT token
+                console.log('Attempting to sign up user with email:', email);
+                console.log('Supabase URL:', process.env.EXPO_PUBLIC_SUPABASE_URL);
+                console.log('Supabase Anon Key exists:', !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+                
+                const { data, error } = await supabase.auth.signUp({ //creates the user id and JWT token
                     email,
                     password,
+                    options: {
+                        emailRedirectTo: Linking.createURL('/'), // Deep link for email confirmation
+                    }
                 });
-                if (error) throw error;
+                
+                if (error) {
+                    console.error('Sign up error:', error);
+                    throw error;
+                }
+                
+                console.log('Sign up successful:', data);
+                console.log('User created:', data.user);
+                console.log('Session created:', data.session);
+                console.log('Email confirmation sent:', data.user?.email_confirmed_at === null);
+                
+                // Check if email confirmation is required
+                if (data.user && !data.session) {
+                    // Email confirmation is required
+                    console.log('Email confirmation required - user needs to verify email');
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                Alert.alert('Success', 'Check your email for verification link');
+                    Alert.alert(
+                        'Check Your Email', 
+                        'Please check your email and click the verification link to complete your registration.',
+                        [
+                            { text: 'OK', style: 'default' },
+                            { text: 'Resend Email', onPress: () => resendConfirmationEmail(email) }
+                        ]
+                    );
+                } else if (data.session) {
+                    // User is immediately signed in (email confirmation disabled)
+                    console.log('User immediately signed in - email confirmation disabled');
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    Alert.alert('Success', 'Account created successfully!');
+                    // Navigation will be handled by AuthContext
+                } else {
+                    console.log('Unexpected signup result:', data);
+                    Alert.alert('Success', 'Account created! Please check your email for verification.');
+                }
             } else { //if user has already signed up
-                const { error } = await supabase.auth.signInWithPassword({
+                console.log('Attempting to sign in user with email:', email);
+                const { data, error } = await supabase.auth.signInWithPassword({
                     email,
                     password,
                 });
-                if (error) throw error;
+                
+                if (error) {
+                    console.error('Sign in error:', error);
+                    throw error;
+                }
+                
+                console.log('Sign in successful:', data);
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 // Navigation will be handled by AuthContext
             }
         } catch (error: any) { //handle any errors
+            console.error('Authentication error:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
             if (error.message?.toLowerCase().includes('email not confirmed')){
@@ -384,119 +301,12 @@ export default function AuthScreen({ navigation }: any) {
                     ]
                 ); 
             } else {
-                Alert.alert('Error', error.message);
+                Alert.alert('Error', error.message || 'An error occurred during authentication');
             }
         } finally { //set loading to false
             setLoading(false);
         }
     };
-
-    // If password recovery mode, show password reset form
-    if (isPasswordRecovery) {
-        return (
-            <SafeAreaView style={styles.container}>
-                <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={styles.keyboardView}
-                >
-                    <ScrollView
-                        contentContainerStyle={styles.scrollContent}
-                        keyboardShouldPersistTaps="handled"
-                        showsVerticalScrollIndicator={false}
-                    >
-                        <View style={styles.content}>
-                            {/* Header */}
-                            <View style={styles.header}>
-                                <LinearGradient
-                                    colors={[colors.primary, colors.accent]}
-                                    style={styles.iconContainer}
-                                >
-                                    <Ionicons name="lock-closed" size={48} color="white" />
-                                </LinearGradient>
-                                <Text style={styles.title}>Set New Password</Text>
-                                <Text style={styles.subtitle}>
-                                    Create a new password for your account
-                                </Text>
-                            </View>
-
-                            {/* Form */}
-                            <View style={styles.form}>
-                                <View style={styles.inputContainer}>
-                                    <Ionicons name="lock-closed" size={20} color={colors.mutedForeground} />
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="New Password"
-                                        value={newPassword}
-                                        onChangeText={setNewPassword}
-                                        secureTextEntry={!showNewPassword}
-                                        autoCapitalize="none"
-                                    />
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                            setShowNewPassword(!showNewPassword);
-                                        }}
-                                        style={styles.eyeButton}
-                                    >
-                                        <Ionicons
-                                            name={showNewPassword ? "eye-off" : "eye"}
-                                            size={20}
-                                            color={colors.mutedForeground}
-                                        />
-                                    </TouchableOpacity>
-                                </View>
-
-                                <View style={styles.inputContainer}>
-                                    <Ionicons name="lock-closed" size={20} color={colors.mutedForeground} />
-                                    <TextInput
-                                        style={styles.input}
-                                        placeholder="Confirm New Password"
-                                        value={confirmPassword}
-                                        onChangeText={setConfirmPassword}
-                                        secureTextEntry={!showConfirmPassword}
-                                        autoCapitalize="none"
-                                    />
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                            setShowConfirmPassword(!showConfirmPassword);
-                                        }}
-                                        style={styles.eyeButton}
-                                    >
-                                        <Ionicons
-                                            name={showConfirmPassword ? "eye-off" : "eye"}
-                                            size={20}
-                                            color={colors.mutedForeground}
-                                        />
-                                    </TouchableOpacity>
-                                </View>
-
-                                <TouchableOpacity
-                                    style={styles.authButton}
-                                    onPress={handleSetNewPassword}
-                                    disabled={loading}
-                                >
-                                    <LinearGradient
-                                        colors={[colors.primary, colors.accent]}
-                                        style={styles.authButtonGradient}
-                                    >
-                                        {loading ? (
-                                            <ActivityIndicator color="white" />
-                                        ) : (
-                                            <Text style={styles.authButtonText}>
-                                                Reset Password
-                                            </Text>
-                                        )}
-                                    </LinearGradient>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </ScrollView>
-                </KeyboardAvoidingView>
-            </SafeAreaView>
-        );
-    }
 
     return (
         <SafeAreaView style={styles.container}>
@@ -564,19 +374,6 @@ export default function AuthScreen({ navigation }: any) {
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Forgot Password Link - Only show on Sign In */}
-                            {!isSignUp && (
-                                <TouchableOpacity
-                                    style={styles.forgotPasswordButton}
-                                    onPress={() => {
-                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                        setResetEmail(email);
-                                        setShowForgotPasswordModal(true);
-                                    }}
-                                >
-                                    <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-                                </TouchableOpacity>
-                            )}
 
                             <TouchableOpacity
                                 style={styles.authButton}
@@ -644,79 +441,6 @@ export default function AuthScreen({ navigation }: any) {
                 </ScrollView>
             </KeyboardAvoidingView>
 
-            {/* Password Reset Modal */}
-            <Modal
-                visible={showForgotPasswordModal}
-                animationType="slide"
-                transparent={true}
-                onRequestClose={() => setShowForgotPasswordModal(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                        style={styles.modalKeyboardView}
-                    >
-                        <View style={styles.modalContent}>
-                            {/* Modal Header */}
-                            <View style={styles.modalHeader}>
-                                <View style={styles.modalIconContainer}>
-                                    <Ionicons name="key" size={32} color={colors.primary} />
-                                </View>
-                                <Text style={styles.modalTitle}>Reset Password</Text>
-                                <Text style={styles.modalSubtitle}>
-                                    Enter your email address and we'll send you a link to reset your password.
-                                </Text>
-                            </View>
-
-                            {/* Email Input */}
-                            <View style={styles.modalInputContainer}>
-                                <Ionicons name="mail" size={20} color={colors.mutedForeground} />
-                                <TextInput
-                                    style={styles.modalInput}
-                                    placeholder="Email"
-                                    value={resetEmail}
-                                    onChangeText={setResetEmail}
-                                    keyboardType="email-address"
-                                    autoCapitalize="none"
-                                    autoFocus={true}
-                                />
-                            </View>
-
-                            {/* Buttons */}
-                            <View style={styles.modalButtons}>
-                                <TouchableOpacity
-                                    style={styles.modalResetButton}
-                                    onPress={handlePasswordReset}
-                                    disabled={resetLoading}
-                                >
-                                    <LinearGradient
-                                        colors={[colors.primary, colors.accent]}
-                                        style={styles.modalResetButtonGradient}
-                                    >
-                                        {resetLoading ? (
-                                            <ActivityIndicator color="white" />
-                                        ) : (
-                                            <Text style={styles.modalResetButtonText}>Send Reset Link</Text>
-                                        )}
-                                    </LinearGradient>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    style={styles.modalCancelButton}
-                                    onPress={() => {
-                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                        setShowForgotPasswordModal(false);
-                                        setResetEmail('');
-                                    }}
-                                    disabled={resetLoading}
-                                >
-                                    <Text style={styles.modalCancelButtonText}>Cancel</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </KeyboardAvoidingView>
-                </View>
-            </Modal>
         </SafeAreaView>
     );
 }
@@ -854,99 +578,5 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: colors.accent,
         fontWeight: '600',
-    },
-    forgotPasswordButton: {
-        alignSelf: 'flex-end',
-        marginTop: 8,
-        marginBottom: 4,
-    },
-    forgotPasswordText: {
-        fontSize: 14,
-        color: colors.accent,
-        fontWeight: '600',
-    },
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        justifyContent: 'flex-end',
-    },
-    modalKeyboardView: {
-        justifyContent: 'flex-end',
-    },
-    modalContent: {
-        backgroundColor: colors.background,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        padding: 24,
-        paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-    },
-    modalHeader: {
-        alignItems: 'center',
-        marginBottom: 24,
-    },
-    modalIconContainer: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        backgroundColor: colors.muted,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    modalTitle: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: colors.foreground,
-        marginBottom: 8,
-    },
-    modalSubtitle: {
-        fontSize: 14,
-        color: colors.mutedForeground,
-        textAlign: 'center',
-        lineHeight: 20,
-    },
-    modalInputContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: colors.card,
-        borderRadius: 16,
-        paddingHorizontal: 16,
-        paddingVertical: 16,
-        borderWidth: 2,
-        borderColor: colors.border,
-        gap: 12,
-        marginBottom: 20,
-    },
-    modalInput: {
-        flex: 1,
-        fontSize: 16,
-        color: colors.foreground,
-    },
-    modalButtons: {
-        gap: 12,
-    },
-    modalResetButton: {
-        borderRadius: 16,
-        overflow: 'hidden',
-    },
-    modalResetButtonGradient: {
-        paddingVertical: 16,
-        alignItems: 'center',
-    },
-    modalResetButtonText: {
-        fontSize: 16,
-        fontWeight: 'bold',
-        color: 'white',
-    },
-    modalCancelButton: {
-        paddingVertical: 16,
-        alignItems: 'center',
-        backgroundColor: colors.muted,
-        borderRadius: 16,
-    },
-    modalCancelButtonText: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: colors.foreground,
     },
 });

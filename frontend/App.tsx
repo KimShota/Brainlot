@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,11 +6,13 @@ import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
 import AuthScreen from './src/screens/AuthScreen';
 import AppNavigator from "./AppNavigator";
+import SplashScreen from './src/components/SplashScreen';
 import { supabase } from './src/lib/supabase';
 import * as Linking from 'expo-linking'; 
 import { NavigationContainer } from '@react-navigation/native';
 
 const prefix = Linking.createURL('/'); 
+//redirect users to the update password screen 
 const linking = {
   prefixes: ['edushorts://', prefix], 
   config: {
@@ -20,9 +22,22 @@ const linking = {
   },
 }; 
 
+//function to control which screen to display based on the user's authentication status
 function AppContent() {
   const { user, loading } = useAuth();
+  const [showSplash, setShowSplash] = useState(true);
 
+  // Handle splash screen completion
+  const handleSplashComplete = () => {
+    setShowSplash(false);
+  };
+
+  // Show splash screen first
+  if (showSplash) {
+    return <SplashScreen onAnimationComplete={handleSplashComplete} />;
+  }
+
+  //show a loading screen while the app is checking the user's status 
   if (loading) {
     return (
       <View style={{ 
@@ -54,26 +69,34 @@ function AppContent() {
     );
   }
 
+  //If the user is not authenticated yet, show the auth screen
   if (!user) {
     return <AuthScreen />;
   }
 
+  //Display the main navigation stack if the user is authenticated 
   return <AppNavigator />;
 }
 
+//we can remove this function in production to avoid the user being logged out every time the app is launched 
 export default function App() {
-  useEffect(() => {
-    const clearOldSession = async () => {
-      try {
-        await supabase.auth.signOut(); 
-        console.log("Old Supabase session cleared — please sign in again.");
-      } catch (error) {
-        console.error("Error clearing old session:", error);
-      }
-    }; 
-    clearOldSession(); 
-  }, []); 
-
+  // Remove automatic session clearing in development
+  // This was causing issues with OAuth login persistence
+  // useEffect(() => {
+  //   const clearOldSession = async () => {
+  //     try {
+  //       await supabase.auth.signOut(); 
+  //       // Clear WebBrowser session to ensure Google auth session is cleared
+  //       const { dismissBrowser } = await import('expo-web-browser');
+  //       await dismissBrowser();
+  //       console.log("Old Supabase session cleared — please sign in again.");
+  //     } catch (error) {
+  //       console.error("Error clearing old session:", error);
+  //     }
+  //   }; 
+  //   clearOldSession(); 
+  // }, []); 
+  
   return (
     <AuthProvider>
       <SubscriptionProvider>

@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabase";
 import { LinearGradient } from "expo-linear-gradient"; 
 import { Ionicons } from '@expo/vector-icons';
 import { useSubscription } from "../contexts/SubscriptionContext"; 
+import * as WebBrowser from "expo-web-browser"; 
 
 //Color theme to match duolingo 
 const colors = {
@@ -30,7 +31,50 @@ const function_url = "/functions/v1/generate-mcqs";
 export default function UploadScreen({ navigation }: any ){
     const [loading, setLoading] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
-    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount } = useSubscription();
+    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
+
+    // Check rate limits for Pro users
+    const checkRateLimits = () => {
+        if (!isProUser) return true; // Free users use existing canUpload logic
+        
+        if (!canUploadNow) {
+            let message = "Rate limit exceeded. ";
+            let nextUploadTime = "";
+            
+            if (nextUploadAllowedAt) {
+                const now = new Date();
+                const timeDiff = nextUploadAllowedAt.getTime() - now.getTime();
+                
+                if (timeDiff > 0) {
+                    const minutes = Math.ceil(timeDiff / (1000 * 60));
+                    const hours = Math.ceil(timeDiff / (1000 * 60 * 60));
+                    
+                    if (hours > 1) {
+                        nextUploadTime = `Please try again in ${hours} hours.`;
+                    } else {
+                        nextUploadTime = `Please try again in ${minutes} minutes.`;
+                    }
+                }
+            }
+            
+            if (uploadsInLastHour >= 20) {
+                message += `You've uploaded ${uploadsInLastHour} files in the last hour (limit: 20). ${nextUploadTime}`;
+            } else if (uploadsInLastDay >= 100) {
+                message += `You've uploaded ${uploadsInLastDay} files in the last day (limit: 100). ${nextUploadTime}`;
+            } else {
+                message += `Please wait 30 seconds between uploads. ${nextUploadTime}`;
+            }
+            
+            Alert.alert(
+                "Upload Rate Limited",
+                message,
+                [{ text: "OK", style: "default" }]
+            );
+            return false;
+        }
+        
+        return true;
+    };
 
     // Handle logout session 
     const handleLogout = async () => {
@@ -43,11 +87,23 @@ export default function UploadScreen({ navigation }: any ){
                     text: "Logout", 
                     style: "destructive",
                     onPress: async () => {
-                        const { error } = await supabase.auth.signOut();
-                        if (error) {
-                            Alert.alert("Error", error.message);
+                        try {
+                            // Clear Supabase session
+                            const { error } = await supabase.auth.signOut();
+                            if (error) {
+                                Alert.alert("Error", error.message);
+                                return;
+                            }
+                            
+                            // Clear WebBrowser session to ensure Google auth session is cleared
+                            await WebBrowser.dismissBrowser();
+                            
+                            console.log("Successfully logged out - sessions cleared");
+                            // Navigation will be handled by AuthContext automatically
+                        } catch (error) {
+                            console.error("Error during logout:", error);
+                            Alert.alert("Error", "Failed to logout properly");
                         }
-                        // Navigation will be handled by AuthContext
                     }
                 }
             ]
@@ -59,7 +115,7 @@ export default function UploadScreen({ navigation }: any ){
         // Haptic feedback on button press
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
-        // Check upload limit
+        // Check upload limit for free users
         if (!canUpload) {
             Alert.alert(
                 "Upload Limit Reached",
@@ -75,6 +131,11 @@ export default function UploadScreen({ navigation }: any ){
             return;
         }
 
+        // Check rate limits for Pro users
+        if (!checkRateLimits()) {
+            return;
+        }
+
         const result = await DocumentPicker.getDocumentAsync({
             type: ["application/pdf"], 
             multiple: false, //change to true if you want multiple pdfs 
@@ -85,11 +146,11 @@ export default function UploadScreen({ navigation }: any ){
     }
 
     //function to load images 
-async function loadImage(){
+    async function loadImage(){
         // Haptic feedback on button press
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
-        // Check upload limit
+        // Check upload limit for free users
         if (!canUpload) {
             Alert.alert(
                 "Upload Limit Reached",
@@ -102,6 +163,11 @@ async function loadImage(){
                     }
                 ]
             );
+            return;
+        }
+
+        // Check rate limits for Pro users
+        if (!checkRateLimits()) {
             return;
         }
 
@@ -360,11 +426,20 @@ async function loadImage(){
                     </LinearGradient>
                     <Text style={styles.heroTitle}>Upload your materials!</Text>
                     
-                    {/* This is the upload count badge to indicate the remaining uploads for the free plan */}
+                    {/* Upload count badge for free users */}
                     {!isProUser && (
                         <View style={styles.uploadCountBadge}>
                             <Text style={styles.uploadCountText}>
                                 Remaining: {uploadLimit - uploadCount}/{uploadLimit} uploads
+                            </Text>
+                        </View>
+                    )}
+                    
+                    {/* Rate limit info for Pro users */}
+                    {isProUser && (
+                        <View style={styles.rateLimitBadge}>
+                            <Text style={styles.rateLimitText}>
+                                Pro Plan: {uploadsInLastHour}/20 per hour, {uploadsInLastDay}/100 per day
                             </Text>
                         </View>
                     )}
@@ -739,6 +814,21 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '700',
         color: colors.secondary,
+    },
+    rateLimitBadge: {
+        marginTop: 16,
+        backgroundColor: `${colors.primary}20`,
+        paddingVertical: 8,
+        paddingHorizontal: 20,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: `${colors.primary}40`,
+    },
+    rateLimitText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: colors.primary,
+        textAlign: 'center',
     },
     proBadge: {
         marginTop: 16,

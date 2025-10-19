@@ -33,7 +33,7 @@ export default function UploadScreen({ navigation }: any ){
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
 
-    // Check rate limits for Pro users
+    //Function to check rate limits for pro users 
     const checkRateLimits = () => {
         if (!isProUser) return true; // Free users use existing canUpload logic
         

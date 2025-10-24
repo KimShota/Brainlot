@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabase";
 import { LinearGradient } from "expo-linear-gradient"; 
 import { Ionicons } from '@expo/vector-icons';
 import { useSubscription } from "../contexts/SubscriptionContext"; 
+import * as WebBrowser from "expo-web-browser"; 
 
 //Color theme to match duolingo 
 const colors = {
@@ -30,7 +31,50 @@ const function_url = "/functions/v1/generate-mcqs";
 export default function UploadScreen({ navigation }: any ){
     const [loading, setLoading] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
-    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount } = useSubscription();
+    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
+
+    //Function to check rate limits for pro users 
+    const checkRateLimits = () => {
+        if (!isProUser) return true; // Free users use existing canUpload logic
+        
+        if (!canUploadNow) {
+            let message = "Rate limit exceeded. ";
+            let nextUploadTime = "";
+            
+            if (nextUploadAllowedAt) {
+                const now = new Date();
+                const timeDiff = nextUploadAllowedAt.getTime() - now.getTime();
+                
+                if (timeDiff > 0) {
+                    const minutes = Math.ceil(timeDiff / (1000 * 60));
+                    const hours = Math.ceil(timeDiff / (1000 * 60 * 60));
+                    
+                    if (hours > 1) { //if the time difference is more than 1 hour
+                        nextUploadTime = `Please try again in ${hours} hours.`;
+                    } else {
+                        nextUploadTime = `Please try again in ${minutes} minutes.`;
+                    }
+                }
+            }
+            
+            if (uploadsInLastHour >= 20) { //if the user uploaded more than 20 files in the last hour
+                message += `You've uploaded ${uploadsInLastHour} files in the last hour (limit: 20). ${nextUploadTime}`;
+            } else if (uploadsInLastDay >= 100) { //if the user uploaded more than 100 files in the day 
+                message += `You've uploaded ${uploadsInLastDay} files in the last day (limit: 100). ${nextUploadTime}`;
+            } else { //if the user uploaded two files in the last 30 seconds
+                message += `Please wait 30 seconds between uploads. ${nextUploadTime}`;
+            }
+            
+            Alert.alert(
+                "Upload Rate Limited",
+                message,
+                [{ text: "OK", style: "default" }]
+            );
+            return false;
+        }
+        
+        return true;
+    };
 
     // Handle logout session 
     const handleLogout = async () => {
@@ -43,11 +87,23 @@ export default function UploadScreen({ navigation }: any ){
                     text: "Logout", 
                     style: "destructive",
                     onPress: async () => {
-                        const { error } = await supabase.auth.signOut();
-                        if (error) {
-                            Alert.alert("Error", error.message);
+                        try {
+                            // Clear Supabase session
+                            const { error } = await supabase.auth.signOut();
+                            if (error) {
+                                Alert.alert("Error", error.message);
+                                return;
+                            }
+                            
+                            // Clear WebBrowser session to ensure Google auth session is cleared
+                            await WebBrowser.dismissBrowser();
+                            
+                            console.log("Successfully logged out - sessions cleared");
+                            // Navigation will be handled by AuthContext automatically
+                        } catch (error) {
+                            console.error("Error during logout:", error);
+                            Alert.alert("Error", "Failed to logout properly");
                         }
-                        // Navigation will be handled by AuthContext
                     }
                 }
             ]
@@ -59,7 +115,7 @@ export default function UploadScreen({ navigation }: any ){
         // Haptic feedback on button press
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
-        // Check upload limit
+        // Check upload limit for free users
         if (!canUpload) {
             Alert.alert(
                 "Upload Limit Reached",
@@ -75,6 +131,11 @@ export default function UploadScreen({ navigation }: any ){
             return;
         }
 
+        // Check rate limits for Pro users
+        if (!checkRateLimits()) {
+            return;
+        }
+
         const result = await DocumentPicker.getDocumentAsync({
             type: ["application/pdf"], 
             multiple: false, //change to true if you want multiple pdfs 
@@ -85,11 +146,11 @@ export default function UploadScreen({ navigation }: any ){
     }
 
     //function to load images 
-async function loadImage(){
+    async function loadImage(){
         // Haptic feedback on button press
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
-        // Check upload limit
+        // Check upload limit for free users
         if (!canUpload) {
             Alert.alert(
                 "Upload Limit Reached",
@@ -102,6 +163,11 @@ async function loadImage(){
                     }
                 ]
             );
+            return;
+        }
+
+        // Check rate limits for Pro users
+        if (!checkRateLimits()) {
             return;
         }
 
@@ -145,140 +211,159 @@ async function loadImage(){
 
     async function handleUpload(uri: string, mime: string){
         try {
+            console.log("🟢 Step 1: handleUpload started");
             setLoading(true); //set loading state to true 
 
-        // 1. Validate MIME type
-        const ALLOWED_MIME_TYPES = [
-            'application/pdf',
-            'image/jpeg',
-            'image/jpg',
-            'image/png',
-            'image/gif',
-            'image/webp'
-        ];
-        
-        if (!ALLOWED_MIME_TYPES.includes(mime)) {
-            throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
-        }
-
-        // 2. Get current user first
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-            throw new Error("User not authenticated. Please log in.");
-        }
-
-        // 3. Load file and validate size
-        const file = await fetch(uri);
-        const arrayBuffer = await file.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-        
-        const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
-        if (uint8Array.length > MAX_FILE_SIZE) {
-            throw new Error(`File too large. Maximum size is 20MB. Your file is ${(uint8Array.length / 1024 / 1024).toFixed(1)}MB.`);
-        }
-
-        // 4. Delete all previous MCQs and files for this user
-        const { data: previousFiles } = await supabase
-            .from("files")
-            .select("id, storage_path")
-            .eq("user_id", user.id);
-        
-        if (previousFiles && previousFiles.length > 0) {
-            const fileIds = previousFiles.map(f => f.id);
+                
+            //List of allowed mime types 
+            const ALLOWED_MIME_TYPES = [
+                'application/pdf',
+                'image/jpeg',
+                'image/jpg',
+                'image/png',
+                'image/gif',
+                'image/webp'
+            ];
             
-            // Delete MCQs
-            const { error: deleteMcqError } = await supabase
-                .from("mcqs")
-                .delete()
-                .in("file_id", fileIds);
-            
-            if (deleteMcqError) {
-                console.warn("Failed to delete previous MCQs:", deleteMcqError);
+            console.log("🟢 Step 2: validating file type");
+            if (!ALLOWED_MIME_TYPES.includes(mime)) {
+                throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
             }
-            
-            // Delete storage files
-            const storagePaths = previousFiles.map(f => f.storage_path);
-            const { error: deleteStorageError } = await supabase.storage
-                .from("study")
-                .remove(storagePaths);
-            
-            if (deleteStorageError) {
-                console.warn("Failed to delete previous storage files:", deleteStorageError);
+
+            // 2. Get current user first
+            console.log("🟢 Step 3: fetching user");
+            const { data: { user } } = await supabase.auth.getUser();
+            console.log("User:", user); 
+            if (!user) {
+                throw new Error("User not authenticated. Please log in.");
             }
+
+            // 3. Load file and validate size
+            console.log("🟢 Step 4: fetching session");
+            const file = await fetch(uri);
+            const arrayBuffer = await file.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
             
-            // Delete file records
-            const { error: deleteFilesError } = await supabase
+            console.log("🟢 Step 5: validating file size");
+            const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+            if (uint8Array.length > MAX_FILE_SIZE) {
+                throw new Error(`File too large. Maximum size is 20MB. Your file is ${(uint8Array.length / 1024 / 1024).toFixed(1)}MB.`);
+            }
+
+            // 4. Delete all previous MCQs and files for this user
+            console.log("🟢 Step 6: deleting previous files");
+            const { data: previousFiles } = await supabase
                 .from("files")
-                .delete()
-                .in("id", fileIds);
+                .select("id, storage_path")
+                .eq("user_id", user.id);
             
-            if (deleteFilesError) {
-                console.warn("Failed to delete previous file records:", deleteFilesError);
+            console.log("🟢 Step 7: checking for previous files");
+            if (previousFiles && previousFiles.length > 0) {
+                const fileIds = previousFiles.map(f => f.id);
+                
+                // Delete MCQs
+                const { error: deleteMcqError } = await supabase
+                    .from("mcqs")
+                    .delete()
+                    .in("file_id", fileIds);
+                
+                if (deleteMcqError) {
+                    console.warn("Failed to delete previous MCQs:", deleteMcqError);
+                }
+                
+                // Delete storage files
+                const storagePaths = previousFiles.map(f => f.storage_path);
+                const { error: deleteStorageError } = await supabase.storage
+                    .from("study")
+                    .remove(storagePaths);
+                
+                if (deleteStorageError) {
+                    console.warn("Failed to delete previous storage files:", deleteStorageError);
+                }
+                
+                // Delete file records
+                const { error: deleteFilesError } = await supabase
+                    .from("files")
+                    .delete()
+                    .in("id", fileIds);
+                
+                if (deleteFilesError) {
+                    console.warn("Failed to delete previous file records:", deleteFilesError);
+                }
             }
-        }
 
-        // 5. Create filename and path (include user_id for security)
-        const fileExt = uri.split(".").pop() ?? "bin";
-        const fileName = `${Date.now()}.${fileExt}`; 
-        const filePath = `${user.id}/${fileName}`; // Include user_id in path for security
+            console.log("🟢 Step 8: creating filename and path");
+            // 5. Create filename and path (include user_id for security)
+            const fileExt = uri.split(".").pop() ?? "bin";
+            const fileName = `${Date.now()}.${fileExt}`; 
+            const filePath = `${user.id}/${fileName}`; // Include user_id in path for security
 
+            console.log("🟢 Step 9: storing file path into upload folder");
+            //store the file path into the upload folder inside storage 
+            const { error: upErr } = await supabase.storage 
+                .from("study") //go to the study storage 
+                .upload(filePath, uint8Array, { //inside the upload folder 
+                    contentType: mime, 
+                    upsert: false, //prohibit from overwriting 
+                }); 
+            
+            if (upErr) throw upErr; 
 
-        //store the file path into the upload folder inside storage 
-        const { error: upErr } = await supabase.storage 
-            .from("study") //go to the study storage 
-            .upload(filePath, uint8Array, { //inside the upload folder 
-                contentType: mime, 
-                upsert: false, //prohibit from overwriting 
+            console.log("🟢 Step 10: getting public url");
+            const { data: pub } = supabase.storage.from("study").getPublicUrl(filePath); //stores an object that contains url
+            const publicUrl = pub?.publicUrl; //store the public url 
+            if (!publicUrl) throw new Error("Public URL is not created");
+
+            console.log("🟢 Step 11: inserting file path and url into files table");
+            //return an object with only the row you inserted the path and url into
+            const { data: files, error: fErr } = await supabase 
+                .from("files")
+                .insert([{ 
+                    storage_path: filePath, 
+                    public_url: publicUrl, 
+                    mime_type: mime,
+                    user_id: user.id, // Associate file with current user
+                }])
+                .select()
+                .limit(1)
+
+            if (fErr) throw fErr; 
+            const fileRow = files![0]; 
+
+            // 6. Get user session token for authentication
+            console.warn("🟢 Step 12: getting user session token");
+            const { data: { session } } = await supabase.auth.getSession();
+            console.log("Access Token:", session?.access_token);
+            console.warn("SESSION", session); //log out the JWT sesson token
+            if (!session) {
+                throw new Error("No active session. Please log in again.");
+            }
+
+            // 7. Call Edge Function with user token
+            console.log("🟢 Step 13: calling edge function");
+            const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+            const fnRes = await fetch(`${baseUrl}${function_url}`, {
+                method: "POST", 
+                headers: {
+                    "Content-Type": "application/json", 
+                    apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+                    Authorization: `Bearer ${session.access_token}`, // Use user's token instead of anon key
+                },
+                body: JSON.stringify({ file_id: fileRow.id }), //give the file id to let the server know which file to process
             }); 
-        
-        if (upErr) throw upErr; 
+            console.log("Edge Function URL:", `${baseUrl}${function_url}`);
 
-        const { data: pub } = supabase.storage.from("study").getPublicUrl(filePath); //stores an object that contains url
-        const publicUrl = pub?.publicUrl; //store the public url 
-        if (!publicUrl) throw new Error("Public URL is not created");
+            console.log(await fnRes.text());
+            if (!fnRes.ok){
+                throw new Error(await fnRes.text()); 
+            }
 
-        //return an object with only the row you inserted the path and url into
-        const { data: files, error: fErr } = await supabase 
-            .from("files")
-            .insert([{ 
-                storage_path: filePath, 
-                public_url: publicUrl, 
-                mime_type: mime,
-                user_id: user.id, // Associate file with current user
-            }])
-            .select()
-            .limit(1)
-
-        if (fErr) throw fErr; 
-        const fileRow = files![0]; 
-
-        // 6. Get user session token for authentication
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-            throw new Error("No active session. Please log in again.");
-        }
-
-        // 7. Call Edge Function with user token
-        const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-        const fnRes = await fetch(`${baseUrl}${function_url}`, {
-            method: "POST", 
-            headers: {
-                "Content-Type": "application/json", 
-                apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-                Authorization: `Bearer ${session.access_token}`, // Use user's token instead of anon key
-            },
-            body: JSON.stringify({ file_id: fileRow.id }),
-        }); 
-
-        if (!fnRes.ok){
-            throw new Error(await fnRes.text()); 
-        }
-
-        // Increment upload count after successful upload
-        await incrementUploadCount();
-        // Success haptic feedback
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setShowSuccessModal(true);
+            console.log("🟢 Step 14: incrementing upload count");
+            // Increment upload count after successful upload
+            await incrementUploadCount();
+            // Success haptic feedback
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setShowSuccessModal(true);
         } catch (e: any) {
             let errorMessage = e.message ?? String(e);
             
@@ -341,11 +426,20 @@ async function loadImage(){
                     </LinearGradient>
                     <Text style={styles.heroTitle}>Upload your materials!</Text>
                     
-                    {/* Upload Count Badge */}
+                    {/* Upload count badge for free users */}
                     {!isProUser && (
                         <View style={styles.uploadCountBadge}>
                             <Text style={styles.uploadCountText}>
                                 Remaining: {uploadLimit - uploadCount}/{uploadLimit} uploads
+                            </Text>
+                        </View>
+                    )}
+                    
+                    {/* Rate limit info for Pro users */}
+                    {isProUser && (
+                        <View style={styles.rateLimitBadge}>
+                            <Text style={styles.rateLimitText}>
+                                Pro Plan: {uploadsInLastHour}/20 per hour, {uploadsInLastDay}/100 per day
                             </Text>
                         </View>
                     )}
@@ -720,6 +814,21 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '700',
         color: colors.secondary,
+    },
+    rateLimitBadge: {
+        marginTop: 16,
+        backgroundColor: `${colors.primary}20`,
+        paddingVertical: 8,
+        paddingHorizontal: 20,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: `${colors.primary}40`,
+    },
+    rateLimitText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: colors.primary,
+        textAlign: 'center',
     },
     proBadge: {
         marginTop: 16,

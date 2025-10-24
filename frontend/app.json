@@ -21,7 +21,10 @@
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow Edu-Shorts to access your photo library to upload study materials",
         "NSCameraUsageDescription": "Allow Edu-Shorts to access your camera to take pictures of study materials"
-      }
+      },
+      "associatedDomains": [
+        "applinks:edushorts.app"
+      ]
     },
     "android": {
       "package": "com.edushorts.app",
@@ -38,7 +41,23 @@
         "CAMERA"
       ],
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "edushorts.app"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "web": {
       "output": "static",

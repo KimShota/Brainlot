@@ -5,14 +5,9 @@ type Body = { file_id: string; job_id?: string };
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
 console.log("🚀 Deployed generate-mcqs function is running with Gemini 2.5 Flash-Lite");
-
-const headers = {
-  "Content-Type": "application/json",
-  apikey: serviceKey,
-  Authorization: `Bearer ${serviceKey}`,
-};
 
 /**
  * Utility: guess MIME type if missing
@@ -131,25 +126,37 @@ Deno.serve(async (req) => {
     const token = authHeader.replace('Bearer ', '');
     
     // Create a Supabase client with the user's token for authentication
+    // Use anon key (not service key) to respect RLS policies
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const supabaseClient = createClient(supabaseUrl, serviceKey, {
+    const supabaseClient = createClient(supabaseUrl, anonKey, {
       global: {
         headers: {
           Authorization: authHeader,
         },
       },
+      auth: {
+        persistSession: false,
+      },
     });
 
+    // Verify user from token
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
     
     if (authError || !user) {
+      console.error("❌ Auth error:", authError);
       return new Response(
         JSON.stringify({ ok: false, error: "Unauthorized: Invalid token" }),
         { status: 401, headers: { "Content-Type": "application/json" } }
       );
     }
+    
+    console.log("✅ User authenticated:", user.id);
 
+    console.log("⚡ Entering ownership verification block");
+    console.log("🟢 Step 2: verifying user");
+    console.log("🟢 Step 3: verifying file_id");
     const { file_id, job_id }: Body = await req.json();
+    console.log("🧾 Parsed request body:", { file_id, job_id });
     if (!file_id) {
       return new Response(
         JSON.stringify({ ok: false, error: "file_id is missing" }),
@@ -157,62 +164,76 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Verify file ownership
-    const fileRes = await fetch(`${supabaseUrl}/rest/v1/files?id=eq.${file_id}`, { headers });
-    const files = await fileRes.json();
-    if (!files.length) {
+    // 3. Verify file ownership using user's JWT token (respects RLS)
+    console.log("🟢 Checking file ownership...");
+    console.log("Received file_id from client:", file_id);
+    
+    const { data: fileData, error: fileError } = await supabaseClient
+      .from('files')
+      .select('*')
+      .eq('id', file_id)
+      .single();
+
+    if (fileError || !fileData) {
+      console.error("❌ File not found or access denied:", fileError);
       return new Response(
-        JSON.stringify({ ok: false, error: "File not found" }),
+        JSON.stringify({ ok: false, error: "File not found or access denied" }),
         { status: 404, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const fileRow = files[0];
-    if (fileRow.user_id !== user.id) {
+    console.log("✅ File found:", fileData);
+    const fileRow = fileData;
+
+    // Ensure job exists (using user's JWT token for RLS)
+    let jobId = job_id;
+    if (!jobId) {
+      const { data: jobData, error: jobCreateError } = await supabaseClient
+        .from('jobs')
+        .insert([{ file_id, status: 'queued' }])
+        .select()
+        .single();
+
+      if (jobCreateError || !jobData) {
+        console.error("Failed to create job:", jobCreateError);
+        return new Response(
+          JSON.stringify({ ok: false, error: "Failed to create the job" }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      jobId = jobData.id;
+    }
+
+    // Mark job as processing (using user's JWT token for RLS)
+    const { error: jobUpdateError } = await supabaseClient
+      .from('jobs')
+      .update({ status: 'processing' })
+      .eq('id', jobId);
+    
+    if (jobUpdateError) {
+      console.error("Failed to update job status:", jobUpdateError);
+    }
+
+    // File metadata already fetched and verified above
+    // Generate a signed URL for private storage access (expires in 1 hour)
+    const { data: signedUrlData, error: signedUrlError } = await supabaseClient
+      .storage
+      .from('study')
+      .createSignedUrl(fileRow.storage_path, 3600); // 3600 seconds = 1 hour
+
+    if (signedUrlError || !signedUrlData) {
+      console.error("Failed to create signed URL:", signedUrlError);
       return new Response(
-        JSON.stringify({ ok: false, error: "Unauthorized: Access denied to this file" }),
-        { status: 403, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({ ok: false, error: "Failed to access file in storage" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // Ensure job exists
-    let jobId = job_id;
-    if (!jobId) {
-      const jobRes = await fetch(`${supabaseUrl}/rest/v1/jobs`, {
-        method: "POST",
-        headers: { ...headers, Prefer: "return=representation" },
-        body: JSON.stringify({ file_id, status: "queued" }),
-      });
-
-      if (!jobRes.ok) {
-        const text = await jobRes.text();
-        return new Response(
-          JSON.stringify({ ok: false, error: text || "Failed to create the job" }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      const data = await jobRes.json().catch(() => []);
-      if (!data || !data.length) {
-        return new Response(
-          JSON.stringify({ ok: false, error: "No job created" }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      jobId = data[0].id;
-    }
-
-    // Mark job as processing
-    await fetch(`${supabaseUrl}/rest/v1/jobs?id=eq.${jobId}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({ status: "processing" }),
-    });
-
-    // File metadata already fetched and verified above
-    const fileUrl = fileRow.public_url;
-    const mimeType = fileRow.mime_type || guessMimeType(fileRow.storage_path); // 👈 fallback added
+    const fileUrl = signedUrlData.signedUrl;
+    const mimeType = fileRow.mime_type || guessMimeType(fileRow.storage_path);
+    
+    console.log("✅ Signed URL created for file access");
 
     // Prompt for MCQ generation
     const prompt = `
@@ -297,26 +318,35 @@ IMPORTANT: Generate questions that test users' understanding and knowledge of th
       throw new Error("Gemini response is not an array: " + geminiRaw);
     }
 
-    // Insert MCQs into DB
-    for (const q of mcqs) {
-      await fetch(`${supabaseUrl}/rest/v1/mcqs`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          file_id,
-          question: q.question,
-          options: q.options,
-          answer_index: q.answer_index,
-        }),
-      });
+    // Insert MCQs into DB (using user's JWT token for RLS)
+    const mcqsToInsert = mcqs.map(q => ({
+      file_id,
+      question: q.question,
+      options: q.options,
+      correct_answer: q.answer_index,
+    }));
+
+    const { error: mcqInsertError } = await supabaseClient
+      .from('mcqs')
+      .insert(mcqsToInsert);
+
+    if (mcqInsertError) {
+      console.error("Failed to insert MCQs:", mcqInsertError);
+      return new Response(
+        JSON.stringify({ ok: false, error: "Failed to insert MCQs into database" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
     }
 
-    // Mark job as done
-    await fetch(`${supabaseUrl}/rest/v1/jobs?id=eq.${jobId}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({ status: "done" }),
-    });
+    // Mark job as done (using user's JWT token for RLS)
+    const { error: jobDoneError } = await supabaseClient
+      .from('jobs')
+      .update({ status: 'done' })
+      .eq('id', jobId);
+
+    if (jobDoneError) {
+      console.error("Failed to mark job as done:", jobDoneError);
+    }
 
     return new Response(
       JSON.stringify({ ok: true, job_id: jobId }),
@@ -324,12 +354,11 @@ IMPORTANT: Generate questions that test users' understanding and knowledge of th
     );
   } catch (e) {
     console.error("Edge function error:", e);
+    console.error("Error stack:", e.stack);
+    console.error("Error message:", e.message);
     
-    // Hide detailed error messages in production
-    const isDevelopment = Deno.env.get("ENVIRONMENT") === "development";
-    const errorMessage = isDevelopment 
-      ? String(e) 
-      : "An unexpected error occurred. Please try again later.";
+    // Always show detailed error for debugging
+    const errorMessage = e.message || String(e);
     
     return new Response(
       JSON.stringify({ ok: false, error: errorMessage }),

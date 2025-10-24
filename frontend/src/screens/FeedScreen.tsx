@@ -17,7 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { supabase } from "../lib/supabase"; 
 import MCQCard from "../components/MCQCard";
 
-// Duolingo-inspired color palette
+//Colors 
 const colors = {
     background: '#f8fdf9', // Light green-tinted background
     foreground: '#1a1f2e', // Deep navy for text
@@ -35,8 +35,8 @@ const PAGE = 8; // each request will return 8 quizzes
 
 //main function
 export default function FeedScreen({ navigation }: any) {
-    const insets = useSafeAreaInsets(); 
-    const win = Dimensions.get("window"); // get the dimensions of your device
+    const insets = useSafeAreaInsets(); //returns an object with the safe area insets not to overlap with the status bar 
+    const win = Dimensions.get("window"); //get dimensions of the device window  
 
     // Use full screen height for true full-screen experience like Instagram Reels
     const ITEM_HEIGHT = useMemo(
@@ -48,7 +48,12 @@ export default function FeedScreen({ navigation }: any) {
     const [from, setFrom] = useState(0); // begin loading from the first question 
     const [loading, setLoading] = useState(false); // check if loading is happening
     const [end, setEnd] = useState(false); // check if it is the end of the quiz table
-    const [error, setError] = useState<string | null>(null); // error state 
+    const [error, setError] = useState<string | null>(null); // error state
+    const [showSwipeHint, setShowSwipeHint] = useState(false); // show swipe hint after first answer
+    const [currentQuestion, setCurrentQuestion] = useState(0); // track current question number
+    const [correctAnswers, setCorrectAnswers] = useState(0); // track correct answers count
+    const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set()); // track answered question IDs 
+    const [userAnswers, setUserAnswers] = useState<Map<string, number>>(new Map()); // Store user's answers 
     
     // load function to fetch MCQs from the database 
     const load = useCallback(async () => {
@@ -57,8 +62,9 @@ export default function FeedScreen({ navigation }: any) {
         setError(null); // Clear previous errors
         
         try {
-            // Get current user
+            //Get the current user 
             const { data: { user } } = await supabase.auth.getUser();
+            //if the current user is not found, log it and set loading to false and return 
             if (!user) {
                 if (__DEV__) console.log('No authenticated user found');
                 setLoading(false);
@@ -94,7 +100,17 @@ export default function FeedScreen({ navigation }: any) {
         } finally {
             setLoading(false); // set loading to false 
         }
-    }, [from, loading, end]); 
+    }, [from, loading, end]);
+
+    // Reset progress when items change (new quiz loaded)
+    useEffect(() => {
+        if (items.length > 0) {
+            setCurrentQuestion(0);
+            setCorrectAnswers(0);
+            setAnsweredQuestions(new Set()); // Reset answered questions
+            setUserAnswers(new Map()); // Reset user answers
+        }
+    }, [items.length]); 
 
     // load the quizzes when the component mounts 
     useEffect(() => {
@@ -102,7 +118,7 @@ export default function FeedScreen({ navigation }: any) {
     }, [load]); 
 
     const renderItem = useCallback(
-        ({ item }: { item: any }) => (
+        ({ item, index }: { item: any; index: number }) => (
             // Each item takes full screen height with no additional containers
             <MCQCard 
                 item={item} 
@@ -110,9 +126,39 @@ export default function FeedScreen({ navigation }: any) {
                 navigation={navigation}
                 safeAreaInsets={insets} // Pass safe area insets to MCQCard
                 colors={colors}
+                showSwipeHint={index === 0 && showSwipeHint} // Show hint only on first MCQ
+                currentQuestion={currentQuestion}
+                totalQuestions={items.length}
+                correctAnswers={correctAnswers}
+                isAnswered={answeredQuestions.has(item.id)} // Pass answered status
+                userAnswer={userAnswers.get(item.id)} // Pass user's previous answer for review mode
+                onAnswered={(isCorrect: boolean, selectedAnswer: number) => {
+                    // Check if this question has already been answered
+                    if (answeredQuestions.has(item.id)) {
+                        return; // Don't process if already answered
+                    }
+                    
+                    // Mark this question as answered
+                    setAnsweredQuestions(prev => new Set(prev).add(item.id));
+                    
+                    // Store user's answer
+                    setUserAnswers(prev => new Map(prev).set(item.id, selectedAnswer));
+                    
+                    if (index === 0) {
+                        setShowSwipeHint(true);
+                    }
+                    
+                    // Update progress
+                    setCurrentQuestion(prev => prev + 1);
+                    
+                    // Update correct answers count
+                    if (isCorrect) {
+                        setCorrectAnswers(prev => prev + 1);
+                    }
+                }}
             />
         ), 
-        [ITEM_HEIGHT, navigation, insets]
+        [ITEM_HEIGHT, navigation, insets, colors, showSwipeHint, currentQuestion, items.length, correctAnswers, answeredQuestions, userAnswers]
     );
 
     // Empty state component
@@ -227,6 +273,14 @@ export default function FeedScreen({ navigation }: any) {
                 disableIntervalMomentum={true} // Prevent momentum from skipping items
                 disableScrollViewPanResponder={false} // Allow pan gestures
                 scrollEnabled={true} // Ensure scrolling is enabled
+
+                //if the user scrolls down halfway through the first MCQ, then hide the swipe hint 
+                onScroll={(e) => {
+                    const offsetY = e.nativeEvent.contentOffset.y; 
+                    if (offsetY > ITEM_HEIGHT * 0.5 && showSwipeHint){ 
+                        setShowSwipeHint(false); 
+                    }
+                }}
             />
             )}
             {loading && !error && (
@@ -356,4 +410,20 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: 'white',
     },
+
+    swipeHintContainer: {
+        position: 'absolute',
+        bottom: 60,
+        left: 0,
+        right: 0,
+        alignItems: 'center',
+        zIndex: 1000,
+        backgroundColor: 'transparent',
+    },
+    swipeHintText: {
+        fontSize: 16,
+        color: colors.accent,
+        fontWeight: '600',
+        marginTop: 6,
+    },    
 });

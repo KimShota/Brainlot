@@ -22,9 +22,8 @@ interface MockOffering {
   }[];
 }
 
-// Subscription plan types
-export type PlanType = 'free' | 'pro';
-export type SubscriptionStatus = 'active' | 'cancelled' | 'expired';
+export type PlanType = 'free' | 'pro'; //subscription plan types 
+export type SubscriptionStatus = 'active' | 'cancelled' | 'expired'; //subscription status 
 
 // Subscription context interface
 interface SubscriptionContextType {
@@ -48,6 +47,7 @@ interface SubscriptionContextType {
   nextUploadAllowedAt: Date | null;
 }
 
+//default values for the subscription context
 const SubscriptionContext = createContext<SubscriptionContextType>({
   planType: 'free',
   subscriptionStatus: 'active',
@@ -69,6 +69,7 @@ const SubscriptionContext = createContext<SubscriptionContextType>({
   nextUploadAllowedAt: null,
 });
 
+//function to use the subscription context across my app 
 export const useSubscription = () => {
   const context = useContext(SubscriptionContext);
   if (!context) {
@@ -79,47 +80,48 @@ export const useSubscription = () => {
 
 export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  const [planType, setPlanType] = useState<PlanType>('free');
-  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>('active');
-  const [uploadCount, setUploadCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [offerings, setOfferings] = useState<MockOffering | null>(null);
+  const [planType, setPlanType] = useState<PlanType>('free'); //default plan is set to free
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>('active'); //set status to active 
+  const [uploadCount, setUploadCount] = useState(0); //set upload count to 0
+  const [loading, setLoading] = useState(true); //set loading to true 
+  const [offerings, setOfferings] = useState<MockOffering | null>(null); //set offerings to null 
   
-  // Rate limiting state
-  const [uploadsInLastHour, setUploadsInLastHour] = useState(0);
-  const [uploadsInLastDay, setUploadsInLastDay] = useState(0);
-  const [nextUploadAllowedAt, setNextUploadAllowedAt] = useState<Date | null>(null);
-  const [recentUploads, setRecentUploads] = useState<Date[]>([]);
+  //settings for rate limiting 
+  const [uploadsInLastHour, setUploadsInLastHour] = useState(0); //set uploads in last hour to 0
+  const [uploadsInLastDay, setUploadsInLastDay] = useState(0); //set uploads in last day to 0
+  const [nextUploadAllowedAt, setNextUploadAllowedAt] = useState<Date | null>(null); //set next upload allowed at to null 
+  const [recentUploads, setRecentUploads] = useState<Date[]>([]); //set recent uploads to an empty array 
 
-  const uploadLimit = planType === 'pro' ? Infinity : 10;
-  const isProUser = planType === 'pro' && subscriptionStatus === 'active';
-  const canUpload = isProUser || uploadCount < uploadLimit;
+  const uploadLimit = planType === 'pro' ? Infinity : 10; //if the user plan is pro, set the upload limit to infinity
+  const isProUser = planType === 'pro' && subscriptionStatus === 'active'; //if the user plan is pro, set isProUser to true 
+  const canUpload = isProUser || uploadCount < uploadLimit; //if the user is pro or if the upload count is less than upload limit, set canUpload to true 
 
-  // Rate limiting configuration
+  //Configurations for rate limits  
   const RATE_LIMITS = {
-    PRO_HOURLY_LIMIT: 20, // Pro users can upload 20 files per hour
-    PRO_DAILY_LIMIT: 100, // Pro users can upload 100 files per day
-    PRO_MIN_INTERVAL: 30, // Minimum 30 seconds between uploads for Pro users
+    PRO_HOURLY_LIMIT: 20, //pro users can upload 20 files per hour 
+    PRO_DAILY_LIMIT: 100, //pro users can upload 100 files per day 
+    PRO_MIN_INTERVAL: 30, //pro users can upload a file every 30 second 
   };
 
   // Pure helper function to calculate rate limit values (no state updates)
   const getRateLimitValues = (uploads: Date[], isPro: boolean) => {
-    const now = new Date();
-    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const now = new Date(); //get the current time 
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000); //get the time one hour ago in milliseconds
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); //get the time one day ago 
 
-    // Count uploads in the last hour and day
-    const uploadsInHour = uploads.filter(date => date > oneHourAgo).length;
-    const uploadsInDay = uploads.filter(date => date > oneDayAgo).length;
+    const uploadsInHour = uploads.filter(date => date > oneHourAgo).length; //extract the number of uploads within the last one hour
+    const uploadsInDay = uploads.filter(date => date > oneDayAgo).length; //extract the number of uploads within the last one day
 
-    // Check if user can upload now
-    let canUploadNow = true;
-    let nextAllowedAt: Date | null = null;
+    let canUploadNow = true; //set canUploadNow to true
+    let nextAllowedAt: Date | null = null; //set next allowed at to null
 
+    //If the plan is pro, 
     if (isPro) {
-      // Check hourly limit
+      //If the number of uploads within the last one hour exceeded the limit, restrict user from uploading 
       if (uploadsInHour >= RATE_LIMITS.PRO_HOURLY_LIMIT) {
         canUploadNow = false;
+
+        //calculate when the user is going to be able to upload again
         const oldestUploadInHour = uploads
           .filter(date => date > oneHourAgo)
           .sort((a, b) => a.getTime() - b.getTime())[0];
@@ -128,9 +130,11 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       }
 
-      // Check daily limit
+      //Check the daily limit for the pro user 
       if (uploadsInDay >= RATE_LIMITS.PRO_DAILY_LIMIT) {
         canUploadNow = false;
+
+        //calculate when the user is going to be able to upload again
         const oldestUploadInDay = uploads
           .filter(date => date > oneDayAgo)
           .sort((a, b) => a.getTime() - b.getTime())[0];
@@ -139,17 +143,18 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       }
 
-      // Check minimum interval
+      //If the user has uploaded a file within the last 30 seconds, restrict user from uploading 
       if (uploads.length > 0) {
         const lastUpload = uploads[uploads.length - 1];
         const timeSinceLastUpload = now.getTime() - lastUpload.getTime();
         if (timeSinceLastUpload < RATE_LIMITS.PRO_MIN_INTERVAL * 1000) {
-          canUploadNow = false;
+          canUploadNow = false; //set canUploadNow to false 
           nextAllowedAt = new Date(lastUpload.getTime() + RATE_LIMITS.PRO_MIN_INTERVAL * 1000);
         }
       }
     }
 
+    //return the current state of the user in terms of rate limiting 
     return {
       uploadsInHour,
       uploadsInDay,
@@ -158,18 +163,18 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
   };
 
-  // Update rate limits whenever recentUploads changes
+  //Update rate limits whenever recentUploads changes or user's plan changes 
   useEffect(() => {
-    const rateLimitValues = getRateLimitValues(recentUploads, isProUser);
+    const rateLimitValues = getRateLimitValues(recentUploads, isProUser); //get the rate limit for the user 
+    //update the values for the rate limits 
     setUploadsInLastHour(rateLimitValues.uploadsInHour);
     setUploadsInLastDay(rateLimitValues.uploadsInDay);
     setNextUploadAllowedAt(rateLimitValues.nextAllowedAt);
 
-    // Set up a timer to update rate limits when nextAllowedAt time passes
+    //update the rate-limit state right when the user is allowed to upload a file again
     if (rateLimitValues.nextAllowedAt) {
       const now = new Date();
-      const timeUntilNext = rateLimitValues.nextAllowedAt.getTime() - now.getTime();
-      
+      const timeUntilNext = rateLimitValues.nextAllowedAt.getTime() - now.getTime(); //calculate the time until the user can upload a file again
       if (timeUntilNext > 0) {
         const timer = setTimeout(() => {
           // Trigger a re-calculation by updating a dummy state
@@ -185,14 +190,14 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
   useEffect(() => {
     const initializeMockRevenueCat = async () => {
       try {
-        // Simulate API call delay
+        //Simulate API call delay, stopping for one second
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         // Mock offerings
         const mockOfferings: MockOffering = {
           availablePackages: [
             {
-              identifier: 'monthly',
+              identifier: 'monthly', //identifies which package we are using in the revenuecat 
               packageType: 'MONTHLY',
               product: {
                 identifier: 'pro_monthly',
@@ -203,13 +208,13 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         };
         
         setOfferings(mockOfferings);
-        if (__DEV__) console.log('Mock RevenueCat initialized');
+        if (__DEV__) console.log('Mock RevenueCat initialized'); //print only during development mode
       } catch (error) {
         console.error('Error initializing mock RevenueCat:', error);
       }
     };
 
-    initializeMockRevenueCat();
+    initializeMockRevenueCat(); //mock the revenue cat
   }, []);
 
   // Fetch subscription data from Supabase
@@ -220,26 +225,26 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     try {
-      // Fetch subscription info
 
+      //authenticate the user 
       const { data: { session } } = await supabase.auth.getSession();
       console.log(session?.access_token); //prints out the JWT token 
 
-
+      //get the subscription data for the user 
       const { data: subscription, error: subError } = await supabase
         .from('user_subscriptions')
         .select('*')
         .eq('user_id', user.id)
         .single();
 
-      if (subError && subError.code !== 'PGRST116') { // PGRST116 = no rows returned
+      if (subError && subError.code !== 'PGRST116') { //PGRST116 means no rows returned
         console.error('Error fetching subscription:', subError);
       } else if (subscription) {
         setPlanType(subscription.plan_type as PlanType);
         setSubscriptionStatus(subscription.status as SubscriptionStatus);
       }
 
-      // Fetch usage stats
+      //get usage stats for the user
       const { data: usage, error: usageError } = await supabase
         .from('user_usage_stats')
         .select('*')

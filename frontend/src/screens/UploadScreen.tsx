@@ -49,7 +49,7 @@ export default function UploadScreen({ navigation }: any ){
                     const minutes = Math.ceil(timeDiff / (1000 * 60));
                     const hours = Math.ceil(timeDiff / (1000 * 60 * 60));
                     
-                    if (hours > 1) {
+                    if (hours > 1) { //if the time difference is more than 1 hour
                         nextUploadTime = `Please try again in ${hours} hours.`;
                     } else {
                         nextUploadTime = `Please try again in ${minutes} minutes.`;
@@ -57,11 +57,11 @@ export default function UploadScreen({ navigation }: any ){
                 }
             }
             
-            if (uploadsInLastHour >= 20) {
+            if (uploadsInLastHour >= 20) { //if the user uploaded more than 20 files in the last hour
                 message += `You've uploaded ${uploadsInLastHour} files in the last hour (limit: 20). ${nextUploadTime}`;
-            } else if (uploadsInLastDay >= 100) {
+            } else if (uploadsInLastDay >= 100) { //if the user uploaded more than 100 files in the day 
                 message += `You've uploaded ${uploadsInLastDay} files in the last day (limit: 100). ${nextUploadTime}`;
-            } else {
+            } else { //if the user uploaded two files in the last 30 seconds
                 message += `Please wait 30 seconds between uploads. ${nextUploadTime}`;
             }
             

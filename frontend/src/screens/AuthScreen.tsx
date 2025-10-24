@@ -23,6 +23,7 @@ import { supabase } from '../lib/supabase';
 
 WebBrowser.maybeCompleteAuthSession();
 
+//color theme 
 const colors = {
     background: '#f8fdf9',
     foreground: '#1a1f2e',
@@ -36,6 +37,8 @@ const colors = {
     destructive: '#dc2626',
 };
 
+
+//function to handle the authentication screen 
 export default function AuthScreen({ navigation }: any) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -43,13 +46,13 @@ export default function AuthScreen({ navigation }: any) {
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
-    // Email validation function
+    //function to validate email 
     const validateEmail = (email: string): boolean => {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         return emailRegex.test(email);
     };
 
-    //Function to validate the password to be at least 6 characters
+    //Use arrow function to validate the password
     const validatePassword = (password: string): string | null => {
         if (password.length < 6) {
             return 'Password must be at least 6 characters';
@@ -57,13 +60,13 @@ export default function AuthScreen({ navigation }: any) {
         return null;
     };
 
-    //resend the confirmation email using Edge Function
+    //resend the confirmation email by sending HTTP request to the edge function
     const resendConfirmationEmail = async (email: string) => {
         try {
             console.log('Attempting to resend confirmation email to:', email);
             console.log('Using Edge Function URL:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`);
             
-            // Call the resend-confirmation Edge Function without authentication
+            //Send HTTP request with POST method to edge function with json string email 
             const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`, {
                 method: 'POST',
                 headers: {
@@ -75,7 +78,7 @@ export default function AuthScreen({ navigation }: any) {
             });
 
             console.log('Edge Function response status:', response.status);
-            const result = await response.json();
+            const result = await response.json(); //take the http response body and convert it into Javascript object
             console.log('Edge Function response:', result);
 
             if (!response.ok || !result.ok) {
@@ -99,18 +102,17 @@ export default function AuthScreen({ navigation }: any) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setLoading(true);
         try {
-            const redirectTo = Linking.createURL('/');
-            //return the URL of the login page of Google OAuth
-            console.log("Redirect URL is:", redirectTo);
+            const redirectTo = Linking.createURL('/'); //creates the deep link by adding / to it
+            console.log("Redirect URL is:", redirectTo); //return the URL of the login page of Google OAuth
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
-                    redirectTo, //deep link to stay users on the app after they have successfully logged in 
-                    skipBrowserRedirect: false, //open the browser automatically for user to sign in
+                    redirectTo, //deep link to the app 
+                    skipBrowserRedirect: false, //open the browser automatically
                 },
             });
             
-            if (error) throw error; //throw error if there is an error
+            if (error) throw error; 
             
             //If the URL of the login page is returned,
             if (data?.url) {
@@ -118,7 +120,7 @@ export default function AuthScreen({ navigation }: any) {
                 //open the in-app browser to sign in with google and close it automatically after they signed in
                 const result = await WebBrowser.openAuthSessionAsync(
                     data.url, 
-                    redirectTo //deep link to stay users on the app after they have successfully logged in 
+                    redirectTo //deep link to the app
                 );
                 
                 //If the browser is closed due to the redirect of the deep link, 

@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
 import AuthScreen from './src/screens/AuthScreen';
 import AppNavigator from "./AppNavigator";
 import SplashScreen from './src/components/SplashScreen';
+import OnboardingScreen from './src/screens/OnboardingScreen';
 import { supabase } from './src/lib/supabase';
 import * as Linking from 'expo-linking'; 
 import { NavigationContainer } from '@react-navigation/native';
@@ -24,12 +26,17 @@ const linking = {
 
 //function to control which screen to display based on the user's authentication status
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, hasSeenOnboarding, completeOnboarding } = useAuth();
   const [showSplash, setShowSplash] = useState(true);
 
   // Handle splash screen completion
   const handleSplashComplete = () => {
     setShowSplash(false);
+  };
+
+  // Handle onboarding completion
+  const handleOnboardingComplete = async () => {
+    await completeOnboarding();
   };
 
   // Show splash screen first
@@ -44,10 +51,10 @@ function AppContent() {
         flex: 1, 
         justifyContent: 'center', 
         alignItems: 'center', 
-        backgroundColor: '#f8fdf9' 
+        backgroundColor: '#1a1a28' 
       }}>
         <LinearGradient 
-          colors={['#58cc02', '#1cb0f6']} 
+          colors={['#8B5CF6', '#A78BFA']} 
           style={{ 
             width: 96, 
             height: 96, 
@@ -55,7 +62,7 @@ function AppContent() {
             justifyContent: 'center', 
             alignItems: 'center',
             marginBottom: 24,
-            shadowColor: '#58cc02',
+            shadowColor: '#8B5CF6',
             shadowOffset: { width: 0, height: 4 },
             shadowOpacity: 0.3,
             shadowRadius: 8,
@@ -64,9 +71,14 @@ function AppContent() {
         >
           <Ionicons name="school" size={48} color="white" />
         </LinearGradient>
-        <ActivityIndicator size="large" color="#58cc02" />
+        <ActivityIndicator size="large" color="#8B5CF6" />
       </View>
     );
+  }
+
+  // Show onboarding for new users
+  if (!hasSeenOnboarding && !user) {
+    return <OnboardingScreen onComplete={handleOnboardingComplete} />;
   }
 
   //If the user is not authenticated yet, show the auth screen
@@ -98,12 +110,14 @@ export default function App() {
   // }, []); 
   
   return (
-    <AuthProvider>
-      <SubscriptionProvider>
-        <NavigationContainer linking={linking}>
-          <AppContent />
-        </NavigationContainer>
-      </SubscriptionProvider>
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <SubscriptionProvider>
+          <NavigationContainer linking={linking}>
+            <AppContent />
+          </NavigationContainer>
+        </SubscriptionProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

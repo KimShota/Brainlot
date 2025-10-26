@@ -5,6 +5,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from 'expo-haptics';
 import { supabase } from "../lib/supabase";
 import { log, warn, error as logError } from "../lib/logger";
+import { getUserFriendlyError } from "../lib/errorUtils";
 import { LinearGradient } from "expo-linear-gradient"; 
 import { Ionicons } from '@expo/vector-icons';
 import { useSubscription } from "../contexts/SubscriptionContext"; 
@@ -12,16 +13,16 @@ import * as WebBrowser from "expo-web-browser";
 
 //Color theme to match duolingo 
 const colors = {
-    background: '#f8fdf9', //light green-tinted background color
-    foreground: '#1a1f2e', //deep navy for text 
-    primary: '#58cc02', // Duolingo kinda green
-    secondary: '#ff9600', // Warm orange accent
-    accent: '#1cb0f6', // Bright blue accent
-    muted: '#f0f9f1', // Very light green
-    mutedForeground: '#6b7280',
-    card: '#ffffff',
-    border: '#e8f5e8',
-    destructive: '#dc2626', // Friendly red
+    background: '#1a1a28',
+    foreground: '#ffffff',
+    primary: '#8B5CF6',
+    secondary: '#A78BFA',
+    accent: '#60A5FA',
+    muted: '#252538',
+    mutedForeground: '#c0c0d0',
+    card: '#252538',
+    border: '#4a4a6e',
+    destructive: '#F87171',
     gold: '#ffd700',
 }
 
@@ -214,7 +215,7 @@ export default function UploadScreen({ navigation }: any ){
         try {
             log("🟢 Step 1: Starting upload process");
             setLoading(true);
-
+                
             // 1. Validate MIME type
             const ALLOWED_MIME_TYPES = [
                 'application/pdf',
@@ -280,7 +281,7 @@ export default function UploadScreen({ navigation }: any ){
                     file_data: base64Data,  // Send file data directly
                     mime_type: mime
                 }),
-            });
+            }); 
 
             if (!fnRes.ok){
                 const errorText = await fnRes.text();
@@ -318,32 +319,10 @@ export default function UploadScreen({ navigation }: any ){
                 rate_limit: result.rate_limit
             });
         } catch (e: any) {
-            let errorMessage = e.message ?? String(e);
+            logError('Upload error:', e);
             
-            // Parse errors for better user experience
-            if (errorMessage.includes("Invalid file type")) {
-                // Keep the original error message
-            } else if (errorMessage.includes("File too large")) {
-                // Keep the original error message
-            } else if (errorMessage.includes("not authenticated") || errorMessage.includes("No active session")) {
-                errorMessage = "Please log in to upload files.";
-            } else if (errorMessage.includes("503") || errorMessage.includes("UNAVAILABLE")) {
-                errorMessage = "The AI service is temporarily unavailable. Please try again in a few minutes.";
-            } else if (errorMessage.includes("400") || errorMessage.includes("INVALID_ARGUMENT")) {
-                errorMessage = "The file format is not supported. Please try a different file.";
-            } else if (errorMessage.includes("401") || errorMessage.includes("Unauthorized")) {
-                errorMessage = "Authentication failed. Please log in again.";
-            } else if (errorMessage.includes("403") || errorMessage.includes("Access denied")) {
-                errorMessage = "Access denied. You don't have permission to perform this action.";
-            } else if (errorMessage.includes("413") || errorMessage.includes("PAYLOAD_TOO_LARGE")) {
-                errorMessage = "The file is too large. Please use a smaller file.";
-            } else if (errorMessage.includes("429") || errorMessage.includes("QUOTA_EXCEEDED")) {
-                errorMessage = "API quota exceeded. Please try again later.";
-            } else {
-                // Generic error message for unexpected errors
-                errorMessage = "An error occurred during upload. Please try again.";
-            }
-            
+            // Use user-friendly error message
+            const errorMessage = getUserFriendlyError(e);
             Alert.alert("Upload Error", errorMessage); 
         } finally {
             setLoading(false); //set loading to false no matter what
@@ -383,19 +362,11 @@ export default function UploadScreen({ navigation }: any ){
                     {!isProUser && (
                         <View style={styles.uploadCountBadge}>
                             <Text style={styles.uploadCountText}>
-                                Remaining: {uploadLimit - uploadCount}/{uploadLimit} uploads
+                                Remaining: {Math.max(0, uploadLimit - uploadCount)}/{uploadLimit} uploads
                             </Text>
                         </View>
                     )}
                     
-                    {/* Rate limit info for Pro users */}
-                    {isProUser && (
-                        <View style={styles.rateLimitBadge}>
-                            <Text style={styles.rateLimitText}>
-                                Pro Plan: {uploadsInLastHour}/20 per hour, {uploadsInLastDay}/100 per day
-                            </Text>
-                        </View>
-                    )}
                     {isProUser && (
                         <View style={styles.proBadge}>
                             <Ionicons name="sparkles" size={16} color={colors.secondary} />
@@ -767,21 +738,6 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '700',
         color: colors.secondary,
-    },
-    rateLimitBadge: {
-        marginTop: 16,
-        backgroundColor: `${colors.primary}20`,
-        paddingVertical: 8,
-        paddingHorizontal: 20,
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: `${colors.primary}40`,
-    },
-    rateLimitText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: colors.primary,
-        textAlign: 'center',
     },
     proBadge: {
         marginTop: 16,

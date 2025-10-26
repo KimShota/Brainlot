@@ -19,13 +19,11 @@ const RATE_LIMIT_MAX_REQUESTS = 10; // 10 requests per hour per user
 const USER_LIMITS = {
   FREE: {
     daily_limit: 10,     // 10 files per day
-    monthly_limit: 300,  // 300 files per month
-    hourly_limit: 2      // 2 files per hour
+    monthly_limit: 300   // 300 files per month
   },
   PRO: {
     daily_limit: 100,    // 100 files per day (effectively unlimited)
-    monthly_limit: 3000, // 3000 files per month
-    hourly_limit: 10     // 10 files per hour
+    monthly_limit: 3000  // 3000 files per month
   }
 };
 
@@ -33,7 +31,6 @@ const USER_LIMITS = {
 const userUsageMap = new Map<string, {
   daily: { count: number, resetTime: number },
   monthly: { count: number, resetTime: number },
-  hourly: { count: number, resetTime: number },
   subscription: 'FREE' | 'PRO'
 }>();
 
@@ -106,7 +103,7 @@ async function getUserSubscription(userId: string, supabaseClient: any): Promise
  */
 function checkUserLimits(userId: string, subscription: 'FREE' | 'PRO'): {
   allowed: boolean;
-  limitType: 'hourly' | 'daily' | 'monthly' | null;
+  limitType: 'daily' | 'monthly' | null;
   remaining: number;
   resetTime: number;
 } {
@@ -119,23 +116,9 @@ function checkUserLimits(userId: string, subscription: 'FREE' | 'PRO'): {
     userUsage = {
       daily: { count: 0, resetTime: now + (24 * 60 * 60 * 1000) },
       monthly: { count: 0, resetTime: now + (30 * 24 * 60 * 60 * 1000) },
-      hourly: { count: 0, resetTime: now + (60 * 60 * 1000) },
       subscription: subscription
     };
     userUsageMap.set(userId, userUsage);
-  }
-  
-  // Check hourly limit
-  if (now > userUsage.hourly.resetTime) {
-    userUsage.hourly = { count: 0, resetTime: now + (60 * 60 * 1000) };
-  }
-  if (userUsage.hourly.count >= limits.hourly_limit) {
-    return {
-      allowed: false,
-      limitType: 'hourly',
-      remaining: 0,
-      resetTime: userUsage.hourly.resetTime
-    };
   }
   
   // Check daily limit
@@ -169,12 +152,10 @@ function checkUserLimits(userId: string, subscription: 'FREE' | 'PRO'): {
     allowed: true,
     limitType: null,
     remaining: Math.min(
-      limits.hourly_limit - userUsage.hourly.count,
       limits.daily_limit - userUsage.daily.count,
       limits.monthly_limit - userUsage.monthly.count
     ),
     resetTime: Math.min(
-      userUsage.hourly.resetTime,
       userUsage.daily.resetTime,
       userUsage.monthly.resetTime
     )
@@ -187,12 +168,11 @@ function checkUserLimits(userId: string, subscription: 'FREE' | 'PRO'): {
 function incrementUserUsage(userId: string): void {
   const userUsage = userUsageMap.get(userId);
   if (userUsage) {
-    userUsage.hourly.count++;
     userUsage.daily.count++;
     userUsage.monthly.count++;
     userUsageMap.set(userId, userUsage);
     
-    console.log(`👤 User ${userId} usage: Hourly(${userUsage.hourly.count}), Daily(${userUsage.daily.count}), Monthly(${userUsage.monthly.count})`);
+    console.log(`👤 User ${userId} usage: Daily(${userUsage.daily.count}), Monthly(${userUsage.monthly.count})`);
   }
 }
 
@@ -392,9 +372,7 @@ Deno.serve(async (req) => {
       const resetTimeDays = Math.ceil((userLimits.resetTime - Date.now()) / (24 * 60 * 60 * 1000));
       
       let errorMessage = "";
-      if (userLimits.limitType === 'hourly') {
-        errorMessage = `Hourly limit reached. You can generate MCQs again in ${resetTimeHours} hours.`;
-      } else if (userLimits.limitType === 'daily') {
+      if (userLimits.limitType === 'daily') {
         errorMessage = `Daily limit reached. You can generate MCQs again in ${resetTimeDays} days.`;
       } else if (userLimits.limitType === 'monthly') {
         errorMessage = `Monthly limit reached. You can generate MCQs again in ${resetTimeDays} days.`;

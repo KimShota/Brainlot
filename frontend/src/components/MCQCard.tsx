@@ -102,8 +102,8 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
         //Make the button green when it is correct
         if (correct) {
             return {
-                backgroundColor: theme.primary,
-                borderColor: theme.primary,
+                backgroundColor: '#10b981',
+                borderColor: '#10b981',
                 borderWidth: 2,
                 transform: [{ scale: 1.02 }],
             };
@@ -200,13 +200,6 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
             <View style={styles.mainContent}>
                 {/* Question - Fixed position */}
                 <View style={styles.questionContainer}>
-                    {/* Answered Badge */}
-                    {isQuestionAnswered && (
-                        <View style={[styles.answeredBadge, { backgroundColor: theme.primary }]}>
-                            <Ionicons name="checkmark" size={12} color="white" />
-                            <Text style={styles.answeredBadgeText}>Answered</Text>
-                        </View>
-                    )}
                     <Text style={[styles.questionText, { color: theme.foreground }]}>
                         {item.question}
                     </Text>
@@ -326,20 +319,6 @@ const styles = StyleSheet.create({
         minHeight: 100, // Minimum height instead of fixed
         paddingHorizontal: 16,
         marginBottom: 40, // Increased spacing between question and options
-    },
-    answeredBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
-        marginBottom: 12,
-        gap: 4,
-    },
-    answeredBadgeText: {
-        color: 'white',
-        fontSize: 12,
-        fontWeight: '600',
     },
     questionText: {
         fontSize: 18,

@@ -16,20 +16,21 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { supabase } from "../lib/supabase";
 import { log, error as logError } from "../lib/logger"; 
+import { getUserFriendlyError } from "../lib/errorUtils";
 import MCQCard from "../components/MCQCard";
 
 //Colors 
 const colors = {
-    background: '#f8fdf9', // Light green-tinted background
-    foreground: '#1a1f2e', // Deep navy for text
-    primary: '#58cc02', // Duolingo green
-    secondary: '#ff9600', // Warm orange accent
-    accent: '#1cb0f6', // Bright blue accent
-    muted: '#f0f9f1', // Very light green
-    mutedForeground: '#6b7280',
-    card: '#ffffff',
-    border: '#e8f5e8',
-    destructive: '#dc2626', // Friendly red
+    background: '#1a1a28',
+    foreground: '#ffffff',
+    primary: '#8B5CF6',
+    secondary: '#A78BFA',
+    accent: '#60A5FA',
+    muted: '#252538',
+    mutedForeground: '#c0c0d0',
+    card: '#252538',
+    border: '#4a4a6e',
+    destructive: '#F87171',
 };
 
 const PAGE = 8; // each request will return 8 quizzes 
@@ -104,6 +105,18 @@ export default function FeedScreen({ navigation, route }: any) {
                         if (isCorrect) {
                             setCorrectAnswers(prev => prev + 1);
                         }
+                        
+                        // Navigate to score summary when all questions are answered
+                        if (answeredQuestions.size + 1 === items.length) {
+                            setTimeout(() => {
+                                navigation.navigate('ScoreSummary', {
+                                    totalQuestions: items.length,
+                                    correctAnswers: isCorrect ? correctAnswers + 1 : correctAnswers,
+                                    userAnswers: new Map(userAnswers).set(itemId, selectedAnswer),
+                                    items: items,
+                                });
+                            }, 1500);
+                        }
                     }}
                 />
             );
@@ -143,13 +156,15 @@ export default function FeedScreen({ navigation, route }: any) {
     );
 
     // Error state component
-    const renderErrorState = () => (
-        <View style={styles.errorState}>
-            <View style={styles.errorIconContainer}>
-                <Ionicons name="alert-circle" size={80} color={colors.destructive} />
-            </View>
-            <Text style={styles.errorTitle}>Oops! Something went wrong</Text>
-            <Text style={styles.errorSubtitle}>{error}</Text>
+    const renderErrorState = () => {
+        const friendlyError = getUserFriendlyError(error);
+        return (
+            <View style={styles.errorState}>
+                <View style={styles.errorIconContainer}>
+                    <Ionicons name="alert-circle" size={80} color={colors.destructive} />
+                </View>
+                <Text style={styles.errorTitle}>Oops! Something went wrong</Text>
+                <Text style={styles.errorSubtitle}>{friendlyError}</Text>
             <TouchableOpacity 
                 style={styles.retryButton}
                 onPress={() => {
@@ -169,8 +184,9 @@ export default function FeedScreen({ navigation, route }: any) {
                     <Text style={styles.retryButtonText}>Upload New Material</Text>
                 </LinearGradient>
             </TouchableOpacity>
-        </View>
-    ); 
+            </View>
+        );
+    }; 
 
     // manually calculate the item layout for perfect snapping
     const getItemLayout = useCallback(

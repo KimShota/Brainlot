@@ -13,6 +13,7 @@ import {
     Platform,
     ScrollView,
     Modal,
+    Image,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
@@ -21,21 +22,22 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { log, error as logError } from '../lib/logger';
+import { getUserFriendlyError } from '../lib/errorUtils';
 
 WebBrowser.maybeCompleteAuthSession();
 
 //color theme 
 const colors = {
-    background: '#f8fdf9',
-    foreground: '#1a1f2e',
-    primary: '#58cc02',
-    secondary: '#ff9600',
-    accent: '#1cb0f6',
-    muted: '#f0f9f1',
-    mutedForeground: '#6b7280',
-    card: '#ffffff',
-    border: '#e8f5e8',
-    destructive: '#dc2626',
+    background: '#1a1a28',
+    foreground: '#ffffff',
+    primary: '#8B5CF6',
+    secondary: '#A78BFA',
+    accent: '#60A5FA',
+    muted: '#252538',
+    mutedForeground: '#c0c0d0',
+    card: '#252538',
+    border: '#4a4a6e',
+    destructive: '#F87171',
 };
 
 
@@ -294,6 +296,7 @@ export default function AuthScreen({ navigation }: any) {
             logError('Authentication error:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
+            // Check for specific email verification error
             if (error.message?.toLowerCase().includes('email not confirmed')){
                 Alert.alert(
                     'Email Not Verified', 
@@ -303,9 +306,12 @@ export default function AuthScreen({ navigation }: any) {
                         { text: 'Resend', onPress: () => resendConfirmationEmail(email) }, 
                     ]
                 ); 
-            } else {
-                Alert.alert('Error', error.message || 'An error occurred during authentication');
+                return;
             }
+            
+            // Use user-friendly error message
+            const userFriendlyMessage = getUserFriendlyError(error);
+            Alert.alert('Error', userFriendlyMessage);
         } finally { //set loading to false
             setLoading(false);
         }
@@ -327,12 +333,11 @@ export default function AuthScreen({ navigation }: any) {
                     <View style={styles.content}>
                         {/* Header */}
                         <View style={styles.header}>
-                            <LinearGradient
-                                colors={[colors.primary, colors.accent]}
-                                style={styles.iconContainer}
-                            >
-                                <Ionicons name="school" size={48} color="white" />
-                            </LinearGradient>
+                            <Image 
+                                source={require('../../assets/images/icon.png')}
+                                style={styles.logoImage}
+                                resizeMode="contain"
+                            />
                             <Text style={styles.title}>Brainlot</Text>
                             <Text style={styles.subtitle}>
                                 {isSignUp ? 'Create your account' : 'Welcome back!'}
@@ -469,12 +474,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 48,
     },
-    iconContainer: {
-        width: 96,
-        height: 96,
+    logoImage: {
+        width: 120,
+        height: 120,
         borderRadius: 24,
-        justifyContent: 'center',
-        alignItems: 'center',
         marginBottom: 24,
         shadowColor: colors.primary,
         shadowOffset: { width: 0, height: 4 },

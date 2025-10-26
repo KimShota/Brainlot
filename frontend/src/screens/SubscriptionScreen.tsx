@@ -15,16 +15,16 @@ import { useSubscription } from '../contexts/SubscriptionContext';
 
 // Color theme
 const colors = {
-  background: '#f8fdf9',
-  foreground: '#1a1f2e',
-  primary: '#58cc02',
-  secondary: '#ff9600',
-  accent: '#1cb0f6',
-  muted: '#f0f9f1',
-  mutedForeground: '#6b7280',
-  card: '#ffffff',
-  border: '#e8f5e8',
-  destructive: '#dc2626',
+  background: '#1a1a28',
+  foreground: '#ffffff',
+  primary: '#8B5CF6',
+  secondary: '#A78BFA',
+  accent: '#60A5FA',
+  muted: '#252538',
+  mutedForeground: '#c0c0d0',
+  card: '#252538',
+  border: '#4a4a6e',
+  destructive: '#F87171',
   gold: '#ffd700',
 };
 
@@ -103,7 +103,7 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
           <Text style={styles.heroSubtitle}>
             {isProUser
               ? 'You are using Pro plan 🎉'
-              : `${uploadLimit - uploadCount} uploads remaining`}
+              : `${Math.max(0, uploadLimit - uploadCount)} uploads remaining`}
           </Text>
         </View>
 

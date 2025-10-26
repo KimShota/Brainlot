@@ -101,7 +101,6 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const RATE_LIMITS = {
     PRO_HOURLY_LIMIT: 20, //pro users can upload 20 files per hour 
     PRO_DAILY_LIMIT: 100, //pro users can upload 100 files per day 
-    PRO_MIN_INTERVAL: 30, //pro users can upload a file every 30 second 
   };
 
   // Pure helper function to calculate rate limit values (no state updates)
@@ -141,16 +140,6 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
           .sort((a, b) => a.getTime() - b.getTime())[0];
         if (oldestUploadInDay) {
           nextAllowedAt = new Date(oldestUploadInDay.getTime() + 24 * 60 * 60 * 1000);
-        }
-      }
-
-      //If the user has uploaded a file within the last 30 seconds, restrict user from uploading 
-      if (uploads.length > 0) {
-        const lastUpload = uploads[uploads.length - 1];
-        const timeSinceLastUpload = now.getTime() - lastUpload.getTime();
-        if (timeSinceLastUpload < RATE_LIMITS.PRO_MIN_INTERVAL * 1000) {
-          canUploadNow = false; //set canUploadNow to false 
-          nextAllowedAt = new Date(lastUpload.getTime() + RATE_LIMITS.PRO_MIN_INTERVAL * 1000);
         }
       }
     }

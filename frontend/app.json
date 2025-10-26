@@ -1,13 +1,13 @@
 {
   "expo": {
-    "name": "Edu-Shorts",
-    "slug": "edu-shorts",
+    "name": "Brainlot",
+    "slug": "brainlot",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "edushorts",
+    "scheme": "brainlot",
     "userInterfaceStyle": "automatic",
-    "description": "Transform your study materials into interactive MCQs. Upload PDFs and images to generate quizzes and learn on the go with TikTok-style swipeable flashcards.",
+    "description": "Brainlot - AI-Powered Learning Platform. Transform your study materials into interactive MCQs. Upload PDFs and images to generate quizzes and learn on the go with TikTok-style swipeable flashcards.",
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
@@ -16,18 +16,18 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.edushorts.app",
+      "bundleIdentifier": "com.brainlot.app",
       "buildNumber": "1",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Allow Edu-Shorts to access your photo library to upload study materials",
-        "NSCameraUsageDescription": "Allow Edu-Shorts to access your camera to take pictures of study materials"
+        "NSPhotoLibraryUsageDescription": "Allow Brainlot to access your photo library to upload study materials",
+        "NSCameraUsageDescription": "Allow Brainlot to access your camera to take pictures of study materials"
       },
       "associatedDomains": [
-        "applinks:edushorts.app"
+        "applinks:brainlot.app"
       ]
     },
     "android": {
-      "package": "com.edushorts.app",
+      "package": "com.brainlot.app",
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#58cc02",
@@ -49,7 +49,7 @@
           "data": [
             {
               "scheme": "https",
-              "host": "edushorts.app"
+              "host": "brainlot.app"
             }
           ],
           "category": [

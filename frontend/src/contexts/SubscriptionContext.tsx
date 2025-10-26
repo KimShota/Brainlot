@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { log, error as logError } from '../lib/logger';
 import { useAuth } from './AuthContext';
 
 // Mock RevenueCat types for development
@@ -208,9 +209,9 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         };
         
         setOfferings(mockOfferings);
-        if (__DEV__) console.log('Mock RevenueCat initialized'); //print only during development mode
+        log('Mock RevenueCat initialized'); //print only during development mode
       } catch (error) {
-        console.error('Error initializing mock RevenueCat:', error);
+        logError('Error initializing mock RevenueCat:', error);
       }
     };
 
@@ -228,7 +229,7 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       //authenticate the user 
       const { data: { session } } = await supabase.auth.getSession();
-      console.log(session?.access_token); //prints out the JWT token 
+      log(session?.access_token); //prints out the JWT token 
 
       //get the subscription data for the user 
       const { data: subscription, error: subError } = await supabase
@@ -238,7 +239,7 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         .single();
 
       if (subError && subError.code !== 'PGRST116') { //PGRST116 means no rows returned
-        console.error('Error fetching subscription:', subError);
+        logError('Error fetching subscription:', subError);
       } else if (subscription) {
         setPlanType(subscription.plan_type as PlanType);
         setSubscriptionStatus(subscription.status as SubscriptionStatus);
@@ -252,12 +253,12 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         .single();
 
       if (usageError && usageError.code !== 'PGRST116') {
-        console.error('Error fetching usage:', usageError);
+        logError('Error fetching usage:', usageError);
       } else if (usage) {
         setUploadCount(usage.uploads_this_month);
       }
     } catch (error) {
-      console.error('Error in fetchSubscriptionData:', error);
+      logError('Error in fetchSubscriptionData:', error);
     } finally {
       setLoading(false);
     }
@@ -280,13 +281,13 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         .eq('user_id', user.id);
 
       if (error) {
-        console.error('Error syncing subscription:', error);
+        logError('Error syncing subscription:', error);
       } else {
         setPlanType(isProSubscribed ? 'pro' : 'free');
         setSubscriptionStatus('active');
       }
     } catch (error) {
-      console.error('Error in syncMockWithSupabase:', error);
+      logError('Error in syncMockWithSupabase:', error);
     }
   };
 
@@ -365,12 +366,12 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         .eq('user_id', user.id);
 
       if (error) {
-        console.error('Error incrementing upload count:', error);
+        logError('Error incrementing upload count:', error);
       } else {
         setUploadCount(newCount);
       }
     } catch (error) {
-      console.error('Error in incrementUploadCount:', error);
+      logError('Error in incrementUploadCount:', error);
       throw error;
     }
   };

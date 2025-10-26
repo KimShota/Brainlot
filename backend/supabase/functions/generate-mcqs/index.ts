@@ -1,52 +1,266 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-type Body = { file_id: string; job_id?: string };
+type Body = { file_data: string; mime_type: string };
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-console.log("🚀 Deployed generate-mcqs function is running with Gemini 2.5 Flash-Lite");
+// Global usage tracking
+let globalUsageCount = 0;
+let globalUsageResetTime = Date.now() + (30 * 24 * 60 * 60 * 1000); // 30 days
+const MAX_GLOBAL_USAGE = 500000; // Supabase free tier limit
+
+// Rate limiting storage (in-memory)
+const rateLimitMap = new Map<string, { count: number, resetTime: number }>();
+const RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_MAX_REQUESTS = 10; // 10 requests per hour per user
+
+// User subscription limits
+const USER_LIMITS = {
+  FREE: {
+    daily_limit: 10,     // 10 files per day
+    monthly_limit: 300,  // 300 files per month
+    hourly_limit: 2      // 2 files per hour
+  },
+  PRO: {
+    daily_limit: 100,    // 100 files per day (effectively unlimited)
+    monthly_limit: 3000, // 3000 files per month
+    hourly_limit: 10     // 10 files per hour
+  }
+};
+
+// User usage tracking (in-memory)
+const userUsageMap = new Map<string, {
+  daily: { count: number, resetTime: number },
+  monthly: { count: number, resetTime: number },
+  hourly: { count: number, resetTime: number },
+  subscription: 'FREE' | 'PRO'
+}>();
+
+// Cache for storing MCQs temporarily (in-memory)
+const mcqCache = new Map<string, { mcqs: any[], timestamp: number }>();
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
+console.log("🚀 Deployed generate-mcqs function (Stateless Architecture with Usage Monitoring)");
 
 /**
- * Utility: guess MIME type if missing
+ * Check global usage limit
  */
-function guessMimeType(filePath: string): string {
-  const ext = filePath.split(".").pop()?.toLowerCase();
-  switch (ext) {
-    case "pdf": return "application/pdf";
-    case "jpg":
-    case "jpeg": return "image/jpeg";
-    case "png": return "image/png";
-    default: return "application/octet-stream";
+function checkGlobalUsage(): { allowed: boolean, remaining: number, resetTime: number } {
+  const now = Date.now();
+  
+  // Reset counter monthly
+  if (now > globalUsageResetTime) {
+    globalUsageCount = 0;
+    globalUsageResetTime = now + (30 * 24 * 60 * 60 * 1000);
+  }
+  
+  if (globalUsageCount >= MAX_GLOBAL_USAGE) {
+    return {
+      allowed: false,
+      remaining: 0,
+      resetTime: globalUsageResetTime
+    };
+  }
+  
+  return {
+    allowed: true,
+    remaining: MAX_GLOBAL_USAGE - globalUsageCount,
+    resetTime: globalUsageResetTime
+  };
+}
+
+/**
+ * Increment global usage counter
+ */
+function incrementGlobalUsage(): void {
+  globalUsageCount++;
+  console.log(`📊 Global usage: ${globalUsageCount}/${MAX_GLOBAL_USAGE}`);
+}
+
+/**
+ * Get user subscription status from database
+ */
+async function getUserSubscription(userId: string, supabaseClient: any): Promise<'FREE' | 'PRO'> {
+  try {
+    const { data, error } = await supabaseClient
+      .from('user_subscriptions')
+      .select('subscription_type, status')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .single();
+    
+    if (error || !data) {
+      return 'FREE'; // Default to free if no subscription found
+    }
+    
+    return data.subscription_type || 'FREE';
+  } catch (error) {
+    console.error('Error fetching user subscription:', error);
+    return 'FREE';
   }
 }
 
 /**
- * Call Gemini with retry logic for temporary failures.
+ * Check user-specific limits (daily, monthly, hourly)
  */
-async function callGeminiWithFile(fileUrl: string, mimeType: string, prompt: string, maxRetries = 3) {
-  // Fetch file data
-  const fileRes = await fetch(fileUrl);
-  if (!fileRes.ok) throw new Error(`Failed to fetch file: ${fileUrl}`);
-  const fileData = new Uint8Array(await fileRes.arrayBuffer());
+function checkUserLimits(userId: string, subscription: 'FREE' | 'PRO'): {
+  allowed: boolean;
+  limitType: 'hourly' | 'daily' | 'monthly' | null;
+  remaining: number;
+  resetTime: number;
+} {
+  const now = Date.now();
+  const limits = USER_LIMITS[subscription];
   
+  // Get or create user usage record
+  let userUsage = userUsageMap.get(userId);
+  if (!userUsage) {
+    userUsage = {
+      daily: { count: 0, resetTime: now + (24 * 60 * 60 * 1000) },
+      monthly: { count: 0, resetTime: now + (30 * 24 * 60 * 60 * 1000) },
+      hourly: { count: 0, resetTime: now + (60 * 60 * 1000) },
+      subscription: subscription
+    };
+    userUsageMap.set(userId, userUsage);
+  }
+  
+  // Check hourly limit
+  if (now > userUsage.hourly.resetTime) {
+    userUsage.hourly = { count: 0, resetTime: now + (60 * 60 * 1000) };
+  }
+  if (userUsage.hourly.count >= limits.hourly_limit) {
+    return {
+      allowed: false,
+      limitType: 'hourly',
+      remaining: 0,
+      resetTime: userUsage.hourly.resetTime
+    };
+  }
+  
+  // Check daily limit
+  if (now > userUsage.daily.resetTime) {
+    userUsage.daily = { count: 0, resetTime: now + (24 * 60 * 60 * 1000) };
+  }
+  if (userUsage.daily.count >= limits.daily_limit) {
+    return {
+      allowed: false,
+      limitType: 'daily',
+      remaining: 0,
+      resetTime: userUsage.daily.resetTime
+    };
+  }
+  
+  // Check monthly limit
+  if (now > userUsage.monthly.resetTime) {
+    userUsage.monthly = { count: 0, resetTime: now + (30 * 24 * 60 * 60 * 1000) };
+  }
+  if (userUsage.monthly.count >= limits.monthly_limit) {
+    return {
+      allowed: false,
+      limitType: 'monthly',
+      remaining: 0,
+      resetTime: userUsage.monthly.resetTime
+    };
+  }
+  
+  // All limits passed
+  return {
+    allowed: true,
+    limitType: null,
+    remaining: Math.min(
+      limits.hourly_limit - userUsage.hourly.count,
+      limits.daily_limit - userUsage.daily.count,
+      limits.monthly_limit - userUsage.monthly.count
+    ),
+    resetTime: Math.min(
+      userUsage.hourly.resetTime,
+      userUsage.daily.resetTime,
+      userUsage.monthly.resetTime
+    )
+  };
+}
+
+/**
+ * Increment user usage counters
+ */
+function incrementUserUsage(userId: string): void {
+  const userUsage = userUsageMap.get(userId);
+  if (userUsage) {
+    userUsage.hourly.count++;
+    userUsage.daily.count++;
+    userUsage.monthly.count++;
+    userUsageMap.set(userId, userUsage);
+    
+    console.log(`👤 User ${userId} usage: Hourly(${userUsage.hourly.count}), Daily(${userUsage.daily.count}), Monthly(${userUsage.monthly.count})`);
+  }
+}
+
+/**
+ * Generate a simple hash for file content
+ */
+function generateFileHash(fileData: string): string {
+  // Simple hash function - in production, consider using crypto.subtle.digest
+  let hash = 0;
+  for (let i = 0; i < fileData.length; i++) {
+    const char = fileData.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return Math.abs(hash).toString(36);
+}
+
+/**
+ * Check if MCQs are cached for this file
+ */
+function getCachedMCQs(fileHash: string): any[] | null {
+  const cached = mcqCache.get(fileHash);
+  if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+    console.log(`📦 Cache hit for file hash: ${fileHash}`);
+    return cached.mcqs;
+  }
+  
+  // Remove expired cache entry
+  if (cached) {
+    mcqCache.delete(fileHash);
+  }
+  
+  return null;
+}
+
+/**
+ * Cache MCQs for future use
+ */
+function cacheMCQs(fileHash: string, mcqs: any[]): void {
+  mcqCache.set(fileHash, {
+    mcqs: mcqs,
+    timestamp: Date.now()
+  });
+  
+  // Clean up old cache entries periodically
+  if (mcqCache.size > 1000) { // Limit cache size
+    const now = Date.now();
+    for (const [key, value] of mcqCache.entries()) {
+      if (now - value.timestamp > CACHE_DURATION) {
+        mcqCache.delete(key);
+      }
+    }
+  }
+}
+
+/**
+ * Call Gemini API with file data directly (no storage required)
+ */
+async function callGeminiWithFileData(fileData: string, mimeType: string, prompt: string, maxRetries = 3) {
   // Check file size (Gemini has a 20MB limit)
-  const fileSizeMB = fileData.length / (1024 * 1024);
+  const fileSizeBytes = (fileData.length * 3) / 4; // base64 to actual size
+  const fileSizeMB = fileSizeBytes / (1024 * 1024);
+  
   if (fileSizeMB > 20) {
-    throw new Error(`File too large: ${fileSizeMB.toFixed(1)}MB. Maximum size is 20MB. Please compress the image.`);
+    throw new Error(`File too large: ${fileSizeMB.toFixed(1)}MB. Maximum size is 20MB. Please compress the file.`);
   }
 
-  // Convert Uint8Array to base64 safely for large files
-  let binaryStr = '';
-  for (let i = 0; i < fileData.length; i += 8192) {
-    const chunk = fileData.slice(i, i + 8192);
-    binaryStr += String.fromCharCode(...chunk);
-  }
-  const base64Data = btoa(binaryStr); 
-
-  // Build request
+  // Build request body
   const body = {
     contents: [
       {
@@ -56,7 +270,7 @@ async function callGeminiWithFile(fileUrl: string, mimeType: string, prompt: str
           {
             inlineData: {
               mimeType,
-              data: base64Data,
+              data: fileData, // base64 encoded file data
             },
           },
         ],
@@ -79,7 +293,6 @@ async function callGeminiWithFile(fileUrl: string, mimeType: string, prompt: str
 
       if (!res.ok) {
         const errorText = await res.text();
-        const errorData = JSON.parse(errorText);
         
         // Check if it's a temporary error (5xx) and we have retries left
         if (res.status >= 500 && attempt < maxRetries) {
@@ -99,7 +312,7 @@ async function callGeminiWithFile(fileUrl: string, mimeType: string, prompt: str
         throw error;
       }
       console.log(`Attempt ${attempt} failed, retrying...`);
-      await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
     }
   }
 }
@@ -108,12 +321,29 @@ Deno.serve(async (req) => {
   try {
     if (req.method !== "POST") {
       return new Response(
-        JSON.stringify({ ok: false, error: "This method is not allowed" }),
+        JSON.stringify({ ok: false, error: "Method not allowed" }),
         { status: 405, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // 1. Verify Authorization header
+    // 1. Check global usage limit first
+    const globalUsage = checkGlobalUsage();
+    if (!globalUsage.allowed) {
+      const resetTimeDays = Math.ceil((globalUsage.resetTime - Date.now()) / (24 * 60 * 60 * 1000));
+      return new Response(
+        JSON.stringify({ 
+          ok: false, 
+          error: `Service temporarily unavailable. Monthly limit reached. Resets in ${resetTimeDays} days.`,
+          global_usage: {
+            remaining: 0,
+            reset_time: globalUsage.resetTime
+          }
+        }),
+        { status: 503, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // 2. Verify Authorization header
     const authHeader = req.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return new Response(
@@ -122,12 +352,12 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 2. Extract and verify user from token
+    // 3. Extract and verify user from token
     const token = authHeader.replace('Bearer ', '');
     
-    // Create a Supabase client with the user's token for authentication
-    // Use anon key (not service key) to respect RLS policies
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    
     const supabaseClient = createClient(supabaseUrl, anonKey, {
       global: {
         headers: {
@@ -152,90 +382,83 @@ Deno.serve(async (req) => {
     
     console.log("✅ User authenticated:", user.id);
 
-    console.log("⚡ Entering ownership verification block");
-    console.log("🟢 Step 2: verifying user");
-    console.log("🟢 Step 3: verifying file_id");
-    const { file_id, job_id }: Body = await req.json();
-    console.log("🧾 Parsed request body:", { file_id, job_id });
-    if (!file_id) {
+    // 4. Get user subscription and check limits
+    const subscription = await getUserSubscription(user.id, supabaseClient);
+    console.log(`👤 User ${user.id} subscription: ${subscription}`);
+    
+    const userLimits = checkUserLimits(user.id, subscription);
+    if (!userLimits.allowed) {
+      const resetTimeHours = Math.ceil((userLimits.resetTime - Date.now()) / (60 * 60 * 1000));
+      const resetTimeDays = Math.ceil((userLimits.resetTime - Date.now()) / (24 * 60 * 60 * 1000));
+      
+      let errorMessage = "";
+      if (userLimits.limitType === 'hourly') {
+        errorMessage = `Hourly limit reached. You can generate MCQs again in ${resetTimeHours} hours.`;
+      } else if (userLimits.limitType === 'daily') {
+        errorMessage = `Daily limit reached. You can generate MCQs again in ${resetTimeDays} days.`;
+      } else if (userLimits.limitType === 'monthly') {
+        errorMessage = `Monthly limit reached. You can generate MCQs again in ${resetTimeDays} days.`;
+      }
+      
       return new Response(
-        JSON.stringify({ ok: false, error: "file_id is missing" }),
+        JSON.stringify({ 
+          ok: false, 
+          error: errorMessage,
+          user_limits: {
+            subscription: subscription,
+            limit_type: userLimits.limitType,
+            remaining: 0,
+            reset_time: userLimits.resetTime
+          }
+        }),
+        { status: 429, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // 5. Parse request body
+    const { file_data, mime_type }: Body = await req.json();
+    
+    if (!file_data || !mime_type) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "file_data and mime_type are required" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // 3. Verify file ownership using user's JWT token (respects RLS)
-    console.log("🟢 Checking file ownership...");
-    console.log("Received file_id from client:", file_id);
-    
-    const { data: fileData, error: fileError } = await supabaseClient
-      .from('files')
-      .select('*')
-      .eq('id', file_id)
-      .single();
+    console.log("📄 File received, mime type:", mime_type);
 
-    if (fileError || !fileData) {
-      console.error("❌ File not found or access denied:", fileError);
+    // 6. Generate file hash for caching
+    const fileHash = generateFileHash(file_data);
+    console.log("🔑 File hash:", fileHash);
+
+    // 7. Check cache first
+    const cachedMCQs = getCachedMCQs(fileHash);
+    if (cachedMCQs) {
+      console.log(`✅ Returning cached MCQs for hash: ${fileHash}`);
       return new Response(
-        JSON.stringify({ ok: false, error: "File not found or access denied" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({ 
+          ok: true, 
+          mcqs: cachedMCQs,
+          generated_at: new Date().toISOString(),
+          count: cachedMCQs.length,
+          cached: true,
+          user_limits: {
+            subscription: subscription,
+            remaining: userLimits.remaining,
+            reset_time: userLimits.resetTime
+          },
+          global_usage: {
+            remaining: globalUsage.remaining,
+            reset_time: globalUsage.resetTime
+          }
+        }),
+        { headers: { "Content-Type": "application/json" } }
       );
     }
 
-    console.log("✅ File found:", fileData);
-    const fileRow = fileData;
-
-    // Ensure job exists (using user's JWT token for RLS)
-    let jobId = job_id;
-    if (!jobId) {
-      const { data: jobData, error: jobCreateError } = await supabaseClient
-        .from('jobs')
-        .insert([{ file_id, status: 'queued' }])
-        .select()
-        .single();
-
-      if (jobCreateError || !jobData) {
-        console.error("Failed to create job:", jobCreateError);
-        return new Response(
-          JSON.stringify({ ok: false, error: "Failed to create the job" }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      jobId = jobData.id;
-    }
-
-    // Mark job as processing (using user's JWT token for RLS)
-    const { error: jobUpdateError } = await supabaseClient
-      .from('jobs')
-      .update({ status: 'processing' })
-      .eq('id', jobId);
+    // 8. Generate new MCQs if not cached
+    console.log("🤖 Generating new MCQs...");
     
-    if (jobUpdateError) {
-      console.error("Failed to update job status:", jobUpdateError);
-    }
-
-    // File metadata already fetched and verified above
-    // Generate a signed URL for private storage access (expires in 1 hour)
-    const { data: signedUrlData, error: signedUrlError } = await supabaseClient
-      .storage
-      .from('study')
-      .createSignedUrl(fileRow.storage_path, 3600); // 3600 seconds = 1 hour
-
-    if (signedUrlError || !signedUrlData) {
-      console.error("Failed to create signed URL:", signedUrlError);
-      return new Response(
-        JSON.stringify({ ok: false, error: "Failed to access file in storage" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const fileUrl = signedUrlData.signedUrl;
-    const mimeType = fileRow.mime_type || guessMimeType(fileRow.storage_path);
-    
-    console.log("✅ Signed URL created for file access");
-
-    // Prompt for MCQ generation
     const prompt = `
 You are an expert MCQ generator. Create 30 high-quality multiple-choice questions that test users' understanding and knowledge of the concepts, facts, and ideas covered in the study material.
 
@@ -286,8 +509,7 @@ BAD EXAMPLES (DO NOT CREATE THESE):
 IMPORTANT: Generate questions that test users' understanding and knowledge of the subject matter. Focus on concepts, facts, and ideas that users should know and understand, not on specific wording or references to the source material. Users should be able to answer all questions based on their knowledge and comprehension of the topics covered.
 `;
 
-    // Call Gemini
-    const geminiRaw = await callGeminiWithFile(fileUrl, mimeType, prompt);
+    const geminiRaw = await callGeminiWithFileData(file_data, mime_type, prompt);
 
     // Parse MCQs - handle both JSON and markdown formats
     let mcqs: any[] = [];
@@ -318,50 +540,66 @@ IMPORTANT: Generate questions that test users' understanding and knowledge of th
       throw new Error("Gemini response is not an array: " + geminiRaw);
     }
 
-    // Insert MCQs into DB (using user's JWT token for RLS)
-    const mcqsToInsert = mcqs.map(q => ({
-      file_id,
-      question: q.question,
-      options: q.options,
-      correct_answer: q.answer_index,
-    }));
+    console.log(`✅ Generated ${mcqs.length} MCQs successfully`);
 
-    const { error: mcqInsertError } = await supabaseClient
-      .from('mcqs')
-      .insert(mcqsToInsert);
+    // 9. Increment usage counters
+    incrementGlobalUsage();
+    incrementUserUsage(user.id);
 
-    if (mcqInsertError) {
-      console.error("Failed to insert MCQs:", mcqInsertError);
-      return new Response(
-        JSON.stringify({ ok: false, error: "Failed to insert MCQs into database" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    // 10. Cache the MCQs for future use
+    cacheMCQs(fileHash, mcqs);
 
-    // Mark job as done (using user's JWT token for RLS)
-    const { error: jobDoneError } = await supabaseClient
-      .from('jobs')
-      .update({ status: 'done' })
-      .eq('id', jobId);
-
-    if (jobDoneError) {
-      console.error("Failed to mark job as done:", jobDoneError);
-    }
-
+    // Return MCQs directly (no database storage)
     return new Response(
-      JSON.stringify({ ok: true, job_id: jobId }),
+      JSON.stringify({ 
+        ok: true, 
+        mcqs: mcqs,
+        generated_at: new Date().toISOString(),
+        count: mcqs.length,
+        cached: false,
+        user_limits: {
+          subscription: subscription,
+          remaining: userLimits.remaining - 1,
+          reset_time: userLimits.resetTime
+        },
+        global_usage: {
+          remaining: globalUsage.remaining - 1,
+          reset_time: globalUsage.resetTime
+        }
+      }),
       { headers: { "Content-Type": "application/json" } }
     );
+
   } catch (e) {
     console.error("Edge function error:", e);
     console.error("Error stack:", e.stack);
     console.error("Error message:", e.message);
     
-    // Always show detailed error for debugging
-    const errorMessage = e.message || String(e);
+    // Hide detailed errors in production for security
+    const isDevelopment = Deno.env.get("ENVIRONMENT") === "development";
+    
+    let userMessage = "An unexpected error occurred. Please try again later.";
+    
+    // Show detailed errors only in development
+    if (isDevelopment) {
+        userMessage = e.message || String(e);
+    } else {
+        // Provide user-friendly messages for common errors in production
+        if (e.message?.includes('File too large')) {
+            userMessage = "File size exceeds the maximum allowed limit (20MB).";
+        } else if (e.message?.includes('Gemini API')) {
+            userMessage = "AI service is temporarily unavailable. Please try again later.";
+        } else if (e.message?.includes('not authenticated')) {
+            userMessage = "Authentication failed. Please log in again.";
+        } else if (e.message?.includes('Failed to fetch')) {
+            userMessage = "Network error. Please check your connection and try again.";
+        } else if (e.message?.includes('JSON')) {
+            userMessage = "Failed to process AI response. Please try again.";
+        }
+    }
     
     return new Response(
-      JSON.stringify({ ok: false, error: errorMessage }),
+      JSON.stringify({ ok: false, error: userMessage }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

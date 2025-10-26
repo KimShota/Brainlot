@@ -11,7 +11,7 @@ type Props = {
         id: string; 
         question: string; 
         options: string[];  
-        correct_answer: number; 
+        answer_index: number; // Changed from correct_answer to answer_index
     }; 
     cardHeight: number;
     navigation?: any;
@@ -51,7 +51,7 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
     const handleOptionPress = (optionIndex: number) => {
         if (isAnswered || isReviewMode) return; //return if user already answered or in review mode
 
-        const isCorrect = optionIndex === item.correct_answer; //check if the chosen option is correct
+        const isCorrect = optionIndex === item.answer_index; //check if the chosen option is correct
         
         //Provide haptic feedback based on correctness 
         if (isCorrect) {
@@ -86,7 +86,7 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
     const insets = safeAreaInsets || { top: 0, bottom: 0, left: 0, right: 0 };
 
     const getOptionStyle = (optionIndex: number) => {
-        const correct = optionIndex === item.correct_answer; //correct option 
+        const correct = optionIndex === item.answer_index; //correct option 
         const picked = optionIndex === selected; //chosen option 
         const userPicked = optionIndex === userAnswer; //user's previous answer
 
@@ -139,7 +139,7 @@ export default function MCQCard({ item, cardHeight, navigation, safeAreaInsets, 
 
     //get the text style for the options
     const getOptionTextStyle = (optionIndex: number) => {
-        const correct = optionIndex === item.correct_answer; //correct option 
+        const correct = optionIndex === item.answer_index; //correct option 
         const picked = optionIndex === selected; //chosen option 
         const userPicked = optionIndex === userAnswer; //user's previous answer
 

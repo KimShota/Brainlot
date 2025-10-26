@@ -20,6 +20,7 @@ import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { log, error as logError } from '../lib/logger';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -63,8 +64,8 @@ export default function AuthScreen({ navigation }: any) {
     //resend the confirmation email by sending HTTP request to the edge function
     const resendConfirmationEmail = async (email: string) => {
         try {
-            console.log('Attempting to resend confirmation email to:', email);
-            console.log('Using Edge Function URL:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`);
+            log('Attempting to resend confirmation email to:', email);
+            log('Using Edge Function URL:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`);
             
             //Send HTTP request with POST method to edge function with json string email 
             const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`, {
@@ -77,9 +78,9 @@ export default function AuthScreen({ navigation }: any) {
                 body: JSON.stringify({ email }),
             });
 
-            console.log('Edge Function response status:', response.status);
+            log('Edge Function response status:', response.status);
             const result = await response.json(); //take the http response body and convert it into Javascript object
-            console.log('Edge Function response:', result);
+            log('Edge Function response:', result);
 
             if (!response.ok || !result.ok) {
                 throw new Error(result.error || 'Failed to resend confirmation email');
@@ -91,7 +92,7 @@ export default function AuthScreen({ navigation }: any) {
                 'A new confirmation email has been sent to your email address. Please check your inbox and spam folder.'
             ); 
         } catch (error: any){
-            console.error('Resend confirmation email error:', error);
+            logError('Resend confirmation email error:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert('Error', error.message || 'Failed to resend confirmation email');
         }
@@ -103,7 +104,7 @@ export default function AuthScreen({ navigation }: any) {
         setLoading(true);
         try {
             const redirectTo = Linking.createURL('/'); //creates the deep link by adding / to it
-            console.log("Redirect URL is:", redirectTo); //return the URL of the login page of Google OAuth
+            log("Redirect URL is:", redirectTo); //return the URL of the login page of Google OAuth
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
@@ -228,9 +229,9 @@ export default function AuthScreen({ navigation }: any) {
         setLoading(true);
         try {
             if (isSignUp) { //if user is sigining up
-                console.log('Attempting to sign up user with email:', email);
-                console.log('Supabase URL:', process.env.EXPO_PUBLIC_SUPABASE_URL);
-                console.log('Supabase Anon Key exists:', !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+                log('Attempting to sign up user with email:', email);
+                log('Supabase URL:', process.env.EXPO_PUBLIC_SUPABASE_URL);
+                log('Supabase Anon Key exists:', !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
                 
                 const { data, error } = await supabase.auth.signUp({ //creates the user id and JWT token
                     email,
@@ -241,19 +242,19 @@ export default function AuthScreen({ navigation }: any) {
                 });
                 
                 if (error) {
-                    console.error('Sign up error:', error);
+                    logError('Sign up error:', error);
                     throw error;
                 }
                 
-                console.log('Sign up successful:', data);
-                console.log('User created:', data.user);
-                console.log('Session created:', data.session);
-                console.log('Email confirmation sent:', data.user?.email_confirmed_at === null);
+                log('Sign up successful:', data);
+                log('User created:', data.user);
+                log('Session created:', data.session);
+                log('Email confirmation sent:', data.user?.email_confirmed_at === null);
                 
                 // Check if email confirmation is required
                 if (data.user && !data.session) {
                     // Email confirmation is required
-                    console.log('Email confirmation required - user needs to verify email');
+                    log('Email confirmation required - user needs to verify email');
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                     Alert.alert(
                         'Check Your Email', 
@@ -265,32 +266,32 @@ export default function AuthScreen({ navigation }: any) {
                     );
                 } else if (data.session) {
                     // User is immediately signed in (email confirmation disabled)
-                    console.log('User immediately signed in - email confirmation disabled');
+                    log('User immediately signed in - email confirmation disabled');
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                     Alert.alert('Success', 'Account created successfully!');
                     // Navigation will be handled by AuthContext
                 } else {
-                    console.log('Unexpected signup result:', data);
+                    log('Unexpected signup result:', data);
                     Alert.alert('Success', 'Account created! Please check your email for verification.');
                 }
             } else { //if user has already signed up
-                console.log('Attempting to sign in user with email:', email);
+                log('Attempting to sign in user with email:', email);
                 const { data, error } = await supabase.auth.signInWithPassword({
                     email,
                     password,
                 });
                 
                 if (error) {
-                    console.error('Sign in error:', error);
+                    logError('Sign in error:', error);
                     throw error;
                 }
                 
-                console.log('Sign in successful:', data);
+                log('Sign in successful:', data);
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 // Navigation will be handled by AuthContext
             }
         } catch (error: any) { //handle any errors
-            console.error('Authentication error:', error);
+            logError('Authentication error:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
             if (error.message?.toLowerCase().includes('email not confirmed')){
@@ -332,7 +333,7 @@ export default function AuthScreen({ navigation }: any) {
                             >
                                 <Ionicons name="school" size={48} color="white" />
                             </LinearGradient>
-                            <Text style={styles.title}>Edu-Shorts</Text>
+                            <Text style={styles.title}>Brainlot</Text>
                             <Text style={styles.subtitle}>
                                 {isSignUp ? 'Create your account' : 'Welcome back!'}
                             </Text>

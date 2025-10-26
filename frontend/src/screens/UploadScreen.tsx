@@ -4,6 +4,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from 'expo-haptics';
 import { supabase } from "../lib/supabase";
+import { log, warn, error as logError } from "../lib/logger";
 import { LinearGradient } from "expo-linear-gradient"; 
 import { Ionicons } from '@expo/vector-icons';
 import { useSubscription } from "../contexts/SubscriptionContext"; 
@@ -98,10 +99,10 @@ export default function UploadScreen({ navigation }: any ){
                             // Clear WebBrowser session to ensure Google auth session is cleared
                             await WebBrowser.dismissBrowser();
                             
-                            console.log("Successfully logged out - sessions cleared");
+                            log("Successfully logged out - sessions cleared");
                             // Navigation will be handled by AuthContext automatically
                         } catch (error) {
-                            console.error("Error during logout:", error);
+                            logError("Error during logout:", error);
                             Alert.alert("Error", "Failed to logout properly");
                         }
                     }
@@ -211,11 +212,10 @@ export default function UploadScreen({ navigation }: any ){
 
     async function handleUpload(uri: string, mime: string){
         try {
-            console.log("🟢 Step 1: handleUpload started");
-            setLoading(true); //set loading state to true 
+            log("🟢 Step 1: Starting upload process");
+            setLoading(true);
 
-                
-            //List of allowed mime types 
+            // 1. Validate MIME type
             const ALLOWED_MIME_TYPES = [
                 'application/pdf',
                 'image/jpeg',
@@ -225,145 +225,98 @@ export default function UploadScreen({ navigation }: any ){
                 'image/webp'
             ];
             
-            console.log("🟢 Step 2: validating file type");
+            log("🟢 Step 2: Validating file type");
             if (!ALLOWED_MIME_TYPES.includes(mime)) {
                 throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
             }
 
-            // 2. Get current user first
-            console.log("🟢 Step 3: fetching user");
+            // 2. Get current user
+            log("🟢 Step 3: Authenticating user");
             const { data: { user } } = await supabase.auth.getUser();
-            console.log("User:", user); 
             if (!user) {
                 throw new Error("User not authenticated. Please log in.");
             }
 
             // 3. Load file and validate size
-            console.log("🟢 Step 4: fetching session");
+            log("🟢 Step 4: Loading file");
             const file = await fetch(uri);
             const arrayBuffer = await file.arrayBuffer();
             const uint8Array = new Uint8Array(arrayBuffer);
             
-            console.log("🟢 Step 5: validating file size");
+            log("🟢 Step 5: Validating file size");
             const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
             if (uint8Array.length > MAX_FILE_SIZE) {
                 throw new Error(`File too large. Maximum size is 20MB. Your file is ${(uint8Array.length / 1024 / 1024).toFixed(1)}MB.`);
             }
 
-            // 4. Delete all previous MCQs and files for this user
-            console.log("🟢 Step 6: deleting previous files");
-            const { data: previousFiles } = await supabase
-                .from("files")
-                .select("id, storage_path")
-                .eq("user_id", user.id);
-            
-            console.log("🟢 Step 7: checking for previous files");
-            if (previousFiles && previousFiles.length > 0) {
-                const fileIds = previousFiles.map(f => f.id);
-                
-                // Delete MCQs
-                const { error: deleteMcqError } = await supabase
-                    .from("mcqs")
-                    .delete()
-                    .in("file_id", fileIds);
-                
-                if (deleteMcqError) {
-                    console.warn("Failed to delete previous MCQs:", deleteMcqError);
-                }
-                
-                // Delete storage files
-                const storagePaths = previousFiles.map(f => f.storage_path);
-                const { error: deleteStorageError } = await supabase.storage
-                    .from("study")
-                    .remove(storagePaths);
-                
-                if (deleteStorageError) {
-                    console.warn("Failed to delete previous storage files:", deleteStorageError);
-                }
-                
-                // Delete file records
-                const { error: deleteFilesError } = await supabase
-                    .from("files")
-                    .delete()
-                    .in("id", fileIds);
-                
-                if (deleteFilesError) {
-                    console.warn("Failed to delete previous file records:", deleteFilesError);
-                }
+            // 4. Convert file to base64
+            log("🟢 Step 6: Encoding file to base64");
+            let binaryStr = '';
+            for (let i = 0; i < uint8Array.length; i += 8192) {
+                const chunk = uint8Array.slice(i, i + 8192);
+                binaryStr += String.fromCharCode(...chunk);
             }
+            const base64Data = btoa(binaryStr);
+            log(`🟢 Step 7: File encoded (${(base64Data.length / 1024 / 1024).toFixed(2)} MB)`);
 
-            console.log("🟢 Step 8: creating filename and path");
-            // 5. Create filename and path (include user_id for security)
-            const fileExt = uri.split(".").pop() ?? "bin";
-            const fileName = `${Date.now()}.${fileExt}`; 
-            const filePath = `${user.id}/${fileName}`; // Include user_id in path for security
-
-            console.log("🟢 Step 9: storing file path into upload folder");
-            //store the file path into the upload folder inside storage 
-            const { error: upErr } = await supabase.storage 
-                .from("study") //go to the study storage 
-                .upload(filePath, uint8Array, { //inside the upload folder 
-                    contentType: mime, 
-                    upsert: false, //prohibit from overwriting 
-                }); 
-            
-            if (upErr) throw upErr; 
-
-            console.log("🟢 Step 10: getting public url");
-            const { data: pub } = supabase.storage.from("study").getPublicUrl(filePath); //stores an object that contains url
-            const publicUrl = pub?.publicUrl; //store the public url 
-            if (!publicUrl) throw new Error("Public URL is not created");
-
-            console.log("🟢 Step 11: inserting file path and url into files table");
-            //return an object with only the row you inserted the path and url into
-            const { data: files, error: fErr } = await supabase 
-                .from("files")
-                .insert([{ 
-                    storage_path: filePath, 
-                    public_url: publicUrl, 
-                    mime_type: mime,
-                    user_id: user.id, // Associate file with current user
-                }])
-                .select()
-                .limit(1)
-
-            if (fErr) throw fErr; 
-            const fileRow = files![0]; 
-
-            // 6. Get user session token for authentication
-            console.warn("🟢 Step 12: getting user session token");
+            // 5. Get user session token
+            log("🟢 Step 8: Getting session token");
             const { data: { session } } = await supabase.auth.getSession();
-            console.log("Access Token:", session?.access_token);
-            console.warn("SESSION", session); //log out the JWT sesson token
             if (!session) {
                 throw new Error("No active session. Please log in again.");
             }
 
-            // 7. Call Edge Function with user token
-            console.log("🟢 Step 13: calling edge function");
+            // 6. Call Edge Function with file data directly (no storage upload)
+            log("🟢 Step 9: Calling Edge Function");
             const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
             const fnRes = await fetch(`${baseUrl}${function_url}`, {
                 method: "POST", 
                 headers: {
                     "Content-Type": "application/json", 
                     apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-                    Authorization: `Bearer ${session.access_token}`, // Use user's token instead of anon key
+                    Authorization: `Bearer ${session.access_token}`,
                 },
-                body: JSON.stringify({ file_id: fileRow.id }), //give the file id to let the server know which file to process
-            }); 
-            console.log("Edge Function URL:", `${baseUrl}${function_url}`);
+                body: JSON.stringify({ 
+                    file_data: base64Data,  // Send file data directly
+                    mime_type: mime
+                }),
+            });
 
-            console.log(await fnRes.text());
             if (!fnRes.ok){
-                throw new Error(await fnRes.text()); 
+                const errorText = await fnRes.text();
+                throw new Error(errorText); 
             }
 
-            console.log("🟢 Step 14: incrementing upload count");
-            // Increment upload count after successful upload
+            // 7. Parse response and get MCQs
+            log("🟢 Step 10: Parsing MCQs");
+            const result = await fnRes.json();
+            
+            if (!result.ok || !result.mcqs) {
+                throw new Error("Failed to generate MCQs");
+            }
+
+            log(`🟢 Step 11: Generated ${result.mcqs.length} MCQs successfully`);
+
+            // 8. Check rate limit info
+            if (result.rate_limit) {
+                log(`🟢 Rate limit: ${result.rate_limit.remaining} remaining, resets at ${new Date(result.rate_limit.reset_time).toLocaleString()}`);
+            }
+
+            // 9. Increment upload count
             await incrementUploadCount();
-            // Success haptic feedback
+
+            // 10. Navigate to Feed with MCQs
+            log("🟢 Step 12: Navigating to Feed");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            setShowSuccessModal(true);
+            
+            // Navigate to Feed with MCQs directly (no database storage)
+            navigation.navigate('Feed', { 
+                mcqs: result.mcqs,
+                generated_at: result.generated_at,
+                count: result.count,
+                cached: result.cached || false,
+                rate_limit: result.rate_limit
+            });
         } catch (e: any) {
             let errorMessage = e.message ?? String(e);
             
@@ -410,7 +363,7 @@ export default function UploadScreen({ navigation }: any ){
                 >
                     <Ionicons name="log-out-outline" size={24} color={colors.destructive} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Edu-Shorts</Text>
+                <Text style={styles.headerTitle}>Brainlot</Text>
                 <Ionicons name="sparkles" size={24} color={colors.secondary} />
             </View>
 

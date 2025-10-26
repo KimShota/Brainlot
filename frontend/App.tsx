@@ -14,7 +14,7 @@ import { NavigationContainer } from '@react-navigation/native';
 const prefix = Linking.createURL('/'); 
 //redirect users to the update password screen 
 const linking = {
-  prefixes: ['edushorts://', prefix], 
+  prefixes: ['brainlot://', prefix], 
   config: {
     screens: {
       UpdatePassword: 'update-password', 

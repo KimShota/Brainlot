@@ -18,25 +18,13 @@ import { supabase } from "../lib/supabase";
 import { log, error as logError } from "../lib/logger"; 
 import { getUserFriendlyError } from "../lib/errorUtils";
 import MCQCard from "../components/MCQCard";
-
-//Colors 
-const colors = {
-    background: '#1a1a28',
-    foreground: '#ffffff',
-    primary: '#8B5CF6',
-    secondary: '#A78BFA',
-    accent: '#60A5FA',
-    muted: '#252538',
-    mutedForeground: '#c0c0d0',
-    card: '#252538',
-    border: '#4a4a6e',
-    destructive: '#F87171',
-};
+import { useTheme } from "../contexts/ThemeContext";
 
 const PAGE = 8; // each request will return 8 quizzes 
 
 //main function
 export default function FeedScreen({ navigation, route }: any) {
+    const { colors } = useTheme();
     const insets = useSafeAreaInsets(); //returns an object with the safe area insets not to overlap with the status bar 
     const win = Dimensions.get("window"); //get dimensions of the device window  
 
@@ -126,16 +114,16 @@ export default function FeedScreen({ navigation, route }: any) {
 
     // Empty state component
     const renderEmptyState = () => (
-        <View style={styles.emptyState}>
-            <View style={styles.emptyIconContainer}>
+        <View style={[styles.emptyState, { backgroundColor: colors.background }]}>
+            <View style={[styles.emptyIconContainer, { backgroundColor: `${colors.primary}10` }]}>
                 <Ionicons name="school-outline" size={80} color={colors.mutedForeground} />
             </View>
-            <Text style={styles.emptyTitle}>No Quizzes Yet!</Text>
-            <Text style={styles.emptySubtitle}>
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No Quizzes Yet!</Text>
+            <Text style={[styles.emptySubtitle, { color: colors.mutedForeground }]}>
                 Upload your study materials to generate MCQs and start learning
             </Text>
             <TouchableOpacity 
-                style={styles.emptyButton}
+                style={[styles.emptyButton, { shadowColor: colors.primary }]}
                 onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     navigation.navigate('Upload');
@@ -159,14 +147,14 @@ export default function FeedScreen({ navigation, route }: any) {
     const renderErrorState = () => {
         const friendlyError = getUserFriendlyError(error);
         return (
-            <View style={styles.errorState}>
-                <View style={styles.errorIconContainer}>
+            <View style={[styles.errorState, { backgroundColor: colors.background }]}>
+                <View style={[styles.errorIconContainer, { backgroundColor: `${colors.destructive}10` }]}>
                     <Ionicons name="alert-circle" size={80} color={colors.destructive} />
                 </View>
-                <Text style={styles.errorTitle}>Oops! Something went wrong</Text>
-                <Text style={styles.errorSubtitle}>{friendlyError}</Text>
+                <Text style={[styles.errorTitle, { color: colors.foreground }]}>Oops! Something went wrong</Text>
+                <Text style={[styles.errorSubtitle, { color: colors.mutedForeground }]}>{friendlyError}</Text>
             <TouchableOpacity 
-                style={styles.retryButton}
+                style={[styles.retryButton, { shadowColor: colors.accent }]}
                 onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     setError(null);
@@ -267,13 +255,11 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         paddingHorizontal: 40,
-        backgroundColor: colors.background,
     },
     emptyIconContainer: {
         width: 120,
         height: 120,
         borderRadius: 60,
-        backgroundColor: `${colors.primary}10`,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 24,
@@ -281,13 +267,11 @@ const styles = StyleSheet.create({
     emptyTitle: {
         fontSize: 28,
         fontWeight: '900',
-        color: colors.foreground,
         marginBottom: 12,
         textAlign: 'center',
     },
     emptySubtitle: {
         fontSize: 16,
-        color: colors.mutedForeground,
         textAlign: 'center',
         lineHeight: 24,
         marginBottom: 32,
@@ -295,7 +279,6 @@ const styles = StyleSheet.create({
     emptyButton: {
         borderRadius: 16,
         overflow: 'hidden',
-        shadowColor: colors.primary,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 8,
@@ -319,13 +302,11 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         paddingHorizontal: 40,
-        backgroundColor: colors.background,
     },
     errorIconContainer: {
         width: 120,
         height: 120,
         borderRadius: 60,
-        backgroundColor: `${colors.destructive}10`,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 24,
@@ -333,13 +314,11 @@ const styles = StyleSheet.create({
     errorTitle: {
         fontSize: 24,
         fontWeight: '900',
-        color: colors.foreground,
         marginBottom: 12,
         textAlign: 'center',
     },
     errorSubtitle: {
         fontSize: 16,
-        color: colors.mutedForeground,
         textAlign: 'center',
         lineHeight: 24,
         marginBottom: 32,
@@ -347,7 +326,6 @@ const styles = StyleSheet.create({
     retryButton: {
         borderRadius: 16,
         overflow: 'hidden',
-        shadowColor: colors.accent,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 8,
@@ -378,7 +356,6 @@ const styles = StyleSheet.create({
     },
     swipeHintText: {
         fontSize: 16,
-        color: colors.accent,
         fontWeight: '600',
         marginTop: 6,
     },    

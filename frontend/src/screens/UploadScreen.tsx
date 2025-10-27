@@ -9,28 +9,15 @@ import { getUserFriendlyError } from "../lib/errorUtils";
 import { LinearGradient } from "expo-linear-gradient"; 
 import { Ionicons } from '@expo/vector-icons';
 import { useSubscription } from "../contexts/SubscriptionContext"; 
+import { useTheme } from "../contexts/ThemeContext";
 import * as WebBrowser from "expo-web-browser"; 
-
-//Color theme to match duolingo 
-const colors = {
-    background: '#1a1a28',
-    foreground: '#ffffff',
-    primary: '#8B5CF6',
-    secondary: '#A78BFA',
-    accent: '#60A5FA',
-    muted: '#252538',
-    mutedForeground: '#c0c0d0',
-    card: '#252538',
-    border: '#4a4a6e',
-    destructive: '#F87171',
-    gold: '#ffd700',
-}
 
 //URL to supabase edge function
 const function_url = "/functions/v1/generate-mcqs"; 
 
 //main function 
 export default function UploadScreen({ navigation }: any ){
+    const { colors, isDarkMode, toggleTheme } = useTheme();
     const [loading, setLoading] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
@@ -330,20 +317,32 @@ export default function UploadScreen({ navigation }: any ){
     }
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
             
             {/* Header with logout button and sparkles */}
-            <View style={styles.header}>
+            <View style={[styles.header, { backgroundColor: `${colors.primary}08` }]}>
                 <TouchableOpacity 
-                    style={styles.logoutButton}
+                    style={[styles.logoutButton, { 
+                        backgroundColor: `${colors.destructive}15`,
+                        borderColor: `${colors.destructive}30`,
+                    }]}
                     onPress={handleLogout}
                     activeOpacity={0.7}
                 >
                     <Ionicons name="log-out-outline" size={24} color={colors.destructive} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Brainlot</Text>
-                <Ionicons name="sparkles" size={24} color={colors.secondary} />
+                <Text style={[styles.headerTitle, { color: colors.foreground }]}>Brainlot</Text>
+                <TouchableOpacity
+                    onPress={toggleTheme}
+                    activeOpacity={0.7}
+                >
+                    <Ionicons 
+                        name={isDarkMode ? "sunny" : "moon"} 
+                        size={24} 
+                        color={colors.accent} 
+                    />
+                </TouchableOpacity>
             </View>
 
             {/* Main Content */}
@@ -356,21 +355,27 @@ export default function UploadScreen({ navigation }: any ){
                     >
                         <Ionicons name="scan" size={48} color="white" />
                     </LinearGradient>
-                    <Text style={styles.heroTitle}>Upload your materials!</Text>
+                    <Text style={[styles.heroTitle, { color: colors.foreground }]}>Upload your materials!</Text>
                     
                     {/* Upload count badge for free users */}
                     {!isProUser && (
-                        <View style={styles.uploadCountBadge}>
-                            <Text style={styles.uploadCountText}>
+                        <View style={[styles.uploadCountBadge, { 
+                            backgroundColor: `${colors.secondary}20`,
+                            borderColor: `${colors.secondary}40`,
+                        }]}>
+                            <Text style={[styles.uploadCountText, { color: colors.secondary }]}>
                                 Remaining: {Math.max(0, uploadLimit - uploadCount)}/{uploadLimit} uploads
                             </Text>
                         </View>
                     )}
                     
                     {isProUser && (
-                        <View style={styles.proBadge}>
+                        <View style={[styles.proBadge, { 
+                            backgroundColor: `${colors.secondary}20`,
+                            borderColor: `${colors.secondary}40`,
+                        }]}>
                             <Ionicons name="sparkles" size={16} color={colors.secondary} />
-                            <Text style={styles.proBadgeText}>Pro - Unlimited</Text>
+                            <Text style={[styles.proBadgeText, { color: colors.secondary }]}>Pro - Unlimited</Text>
                         </View>
                     )}
                 </View>
@@ -378,7 +383,10 @@ export default function UploadScreen({ navigation }: any ){
                 {/* Upload Cards */}
                 <View style={styles.cardsContainer}>
                     <TouchableOpacity
-                        style={[styles.card, styles.pdfCard]}
+                        style={[styles.card, styles.pdfCard, {
+                            backgroundColor: colors.card,
+                            borderColor: `${colors.primary}33`,
+                        }]}
                         onPress={loadPdf}
                         activeOpacity={0.95}
                         disabled={loading}
@@ -390,13 +398,16 @@ export default function UploadScreen({ navigation }: any ){
                             <Ionicons name="document-text" size={36} color="white" />
                         </LinearGradient>
                         <View style={styles.cardContent}>
-                            <Text style={styles.cardTitle}>PDF Document</Text>
-                            <Text style={styles.cardSubtitle}>Scan text and extract data ✨</Text>
+                            <Text style={[styles.cardTitle, { color: colors.foreground }]}>PDF Document</Text>
+                            <Text style={[styles.cardSubtitle, { color: colors.mutedForeground }]}>Scan text and extract data ✨</Text>
                         </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        style={[styles.card, styles.imageCard]}
+                        style={[styles.card, styles.imageCard, {
+                            backgroundColor: colors.card,
+                            borderColor: `${colors.secondary}33`,
+                        }]}
                         onPress={loadImage}
                         activeOpacity={0.95}
                         disabled={loading}
@@ -408,8 +419,8 @@ export default function UploadScreen({ navigation }: any ){
                             <Ionicons name="image" size={36} color="white" />
                         </LinearGradient>
                         <View style={styles.cardContent}>
-                            <Text style={styles.cardTitle}>Image File</Text>
-                            <Text style={styles.cardSubtitle}>Process visual content 📸</Text>
+                            <Text style={[styles.cardTitle, { color: colors.foreground }]}>Image File</Text>
+                            <Text style={[styles.cardSubtitle, { color: colors.mutedForeground }]}>Process visual content 📸</Text>
                         </View>
                     </TouchableOpacity>
                 </View>
@@ -418,9 +429,9 @@ export default function UploadScreen({ navigation }: any ){
             {/* Loading Overlay */}
             {loading && (
                 <View style={styles.loadingOverlay}>
-                    <View style={styles.loadingCard}>
+                    <View style={[styles.loadingCard, { backgroundColor: colors.card }]}>
                         <ActivityIndicator size="large" color={colors.primary} />
-                        <Text style={styles.loadingText}>Processing...</Text>
+                        <Text style={[styles.loadingText, { color: colors.foreground }]}>Processing...</Text>
                     </View>
                 </View>
             )}
@@ -433,13 +444,13 @@ export default function UploadScreen({ navigation }: any ){
                 onRequestClose={() => setShowSuccessModal(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={styles.successModal}>
+                    <View style={[styles.successModal, { backgroundColor: colors.card }]}>
                         <View style={styles.successIconContainer}>
                             <Ionicons name="checkmark-circle" size={80} color={colors.primary} />
                         </View>
                         
-                        <Text style={styles.successTitle}>MCQs are Ready! 🎉</Text>
-                        <Text style={styles.successMessage}>
+                        <Text style={[styles.successTitle, { color: colors.foreground }]}>MCQs are Ready! 🎉</Text>
+                        <Text style={[styles.successMessage, { color: colors.mutedForeground }]}>
                             Your MCQs have been generated successfully! Ready to practice?
                         </Text>
                         
@@ -466,7 +477,10 @@ export default function UploadScreen({ navigation }: any ){
             </Modal>
 
             {/* Shopping Cart Button - Fixed at Bottom */}
-            <View style={styles.bottomCartContainer}>
+            <View style={[styles.bottomCartContainer, { 
+                backgroundColor: colors.background,
+                borderTopColor: colors.border,
+            }]}>
                 <TouchableOpacity
                     style={[styles.cartButton, loading && styles.cartButtonDisabled]}
                     onPress={() => navigation.navigate("Subscription", { source: 'upload' })}
@@ -474,7 +488,7 @@ export default function UploadScreen({ navigation }: any ){
                     disabled={loading}
                 >
                     <LinearGradient
-                        colors={[colors.secondary, colors.gold]}
+                        colors={[colors.secondary, colors.gold!]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
                         style={styles.cartButtonGradient}
@@ -493,7 +507,6 @@ export default function UploadScreen({ navigation }: any ){
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.background,
     },
     header: {
         flexDirection: 'row',
@@ -501,24 +514,15 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: 24,
         paddingVertical: 20,
-        backgroundColor: `${colors.primary}08`,
     },
     logoutButton: {
         padding: 8,
         borderRadius: 20,
-        backgroundColor: `${colors.destructive}15`,
         borderWidth: 1,
-        borderColor: `${colors.destructive}30`,
-    },
-    backButton: {
-        padding: 8,
-        borderRadius: 20,
-        backgroundColor: `${colors.primary}15`,
     },
     headerTitle: {
         fontSize: 20,
         fontWeight: 'bold',
-        color: colors.foreground,
         flex: 1,
         textAlign: 'center',
     },
@@ -538,7 +542,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 24,
-        shadowColor: colors.primary,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,
@@ -547,14 +550,12 @@ const styles = StyleSheet.create({
     heroTitle: {
         fontSize: 28,
         fontWeight: '900',
-        color: colors.foreground,
         textAlign: 'center',
         marginBottom: 16,
         lineHeight: 34,
     },
     heroSubtitle: {
         fontSize: 16,
-        color: colors.mutedForeground,
         textAlign: 'center',
         fontWeight: '500',
         paddingHorizontal: 8,
@@ -576,14 +577,10 @@ const styles = StyleSheet.create({
         elevation: 4,
     },
     pdfCard: {
-        backgroundColor: colors.card,
-        borderColor: `${colors.primary}33`,
-        shadowColor: colors.primary,
+        shadowOpacity: 0.1,
     },
     imageCard: {
-        backgroundColor: colors.card,
-        borderColor: `${colors.secondary}33`,
-        shadowColor: colors.secondary,
+        shadowOpacity: 0.1,
     },
     cardIcon: {
         width: 72,
@@ -603,12 +600,10 @@ const styles = StyleSheet.create({
     cardTitle: {
         fontSize: 20,
         fontWeight: '900',
-        color: colors.foreground,
         marginBottom: 4,
     },
     cardSubtitle: {
         fontSize: 14,
-        color: colors.mutedForeground,
         fontWeight: '500',
     },
     actionButtons: {
@@ -623,18 +618,6 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         borderWidth: 1,
     },
-    accentButton: {
-        backgroundColor: `${colors.accent}1A`,
-        borderColor: `${colors.accent}4D`,
-    },
-    primaryButton: {
-        backgroundColor: `${colors.primary}1A`,
-        borderColor: `${colors.primary}4D`,
-    },
-    actionButtonText: {
-        fontSize: 14,
-        fontWeight: 'bold',
-    },
     loadingOverlay: {
         position: 'absolute',
         top: 0,
@@ -646,7 +629,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     loadingCard: {
-        backgroundColor: colors.card,
         padding: 32,
         borderRadius: 20,
         alignItems: 'center',
@@ -659,7 +641,6 @@ const styles = StyleSheet.create({
     loadingText: {
         fontSize: 16,
         fontWeight: '600',
-        color: colors.foreground,
     },
     bottomIndicator: {
         alignItems: 'center',
@@ -678,7 +659,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
     },
     successModal: {
-        backgroundColor: colors.card,
         borderRadius: 24,
         padding: 32,
         alignItems: 'center',
@@ -696,13 +676,11 @@ const styles = StyleSheet.create({
     successTitle: {
         fontSize: 25,
         fontWeight: '900',
-        color: colors.foreground,
         marginBottom: 16,
         textAlign: 'center',
     },
     successMessage: {
         fontSize: 16,
-        color: colors.mutedForeground,
         textAlign: 'center',
         lineHeight: 24,
         marginBottom: 32,
@@ -727,26 +705,23 @@ const styles = StyleSheet.create({
     },
     uploadCountBadge: {
         marginTop: 16,
-        backgroundColor: `${colors.secondary}20`,
         paddingVertical: 8,
         paddingHorizontal: 20,
         borderRadius: 20,
         borderWidth: 1,
-        borderColor: `${colors.secondary}40`,
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     uploadCountText: {
         fontSize: 14,
         fontWeight: '700',
-        color: colors.secondary,
     },
     proBadge: {
         marginTop: 16,
-        backgroundColor: `${colors.secondary}20`,
         paddingVertical: 8,
         paddingHorizontal: 20,
         borderRadius: 20,
         borderWidth: 1,
-        borderColor: `${colors.secondary}40`,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
@@ -754,7 +729,6 @@ const styles = StyleSheet.create({
     proBadgeText: {
         fontSize: 14,
         fontWeight: '700',
-        color: colors.secondary,
     },
     bottomCartContainer: {
         position: 'absolute',
@@ -764,9 +738,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
         paddingVertical: 16,
         paddingBottom: 32,
-        backgroundColor: colors.background,
         borderTopWidth: 1,
-        borderTopColor: colors.border,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -2 },
         shadowOpacity: 0.1,

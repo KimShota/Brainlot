@@ -13,21 +13,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MCQCard from '../components/MCQCard';
 import { Dimensions } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
-
-const colors = {
-  background: '#1a1a28',
-  foreground: '#ffffff',
-  primary: '#8B5CF6',
-  secondary: '#A78BFA',
-  accent: '#60A5FA',
-  muted: '#252538',
-  mutedForeground: '#c0c0d0',
-  card: '#252538',
-  border: '#4a4a6e',
-  destructive: '#F87171',
-};
 
 interface ScoreSummaryScreenProps {
   navigation: any;
@@ -42,6 +30,7 @@ interface ScoreSummaryScreenProps {
 }
 
 export default function ScoreSummaryScreen({ navigation, route }: ScoreSummaryScreenProps) {
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { totalQuestions, correctAnswers, userAnswers, items } = route.params;
   const [viewMode, setViewMode] = useState<'summary' | 'retest'>('summary');
@@ -94,7 +83,7 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
         
         {/* Header */}
         <SafeAreaView style={{ backgroundColor: colors.background }}>
-          <View style={styles.reviewHeader}>
+          <View style={[styles.reviewHeader, { borderBottomColor: colors.border }]}>
             <TouchableOpacity
               onPress={() => {
                 setViewMode('summary');
@@ -107,7 +96,7 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
             >
               <Ionicons name="arrow-back" size={24} color={colors.foreground} />
             </TouchableOpacity>
-            <Text style={styles.reviewTitle}>Practice Incorrect Questions</Text>
+            <Text style={[styles.reviewTitle, { color: colors.foreground }]}>Practice Incorrect Questions</Text>
             <View style={{ width: 40 }} />
           </View>
         </SafeAreaView>
@@ -127,12 +116,16 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
             const correctAnswer = item.answer_index;
 
             return (
-              <View key={itemId} style={styles.reviewItem}>
+              <View key={itemId} style={[styles.reviewItem, { 
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                shadowColor: colors.primary,
+              }]}>
                 <View style={styles.reviewItemHeader}>
-                  <Text style={styles.reviewItemNumber}>Question {index + 1} of {incorrectQuestions.length}</Text>
+                  <Text style={[styles.reviewItemNumber, { color: colors.mutedForeground }]}>Question {index + 1} of {incorrectQuestions.length}</Text>
                 </View>
                 
-                <Text style={styles.reviewQuestion}>{item.question}</Text>
+                <Text style={[styles.reviewQuestion, { color: colors.foreground }]}>{item.question}</Text>
                 
                 <View style={styles.reviewOptions}>
                   {item.options.map((opt: string, idx: number) => {
@@ -168,6 +161,7 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
                         }}
                         style={[
                           styles.reviewOption,
+                          { backgroundColor: colors.muted },
                           isSelected && !isCorrect && showResult && styles.incorrectAnswer,
                           isCorrect && showResult && styles.correctAnswer,
                         ]}
@@ -189,6 +183,7 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
                         />
                         <Text style={[
                           styles.reviewOptionText,
+                          { color: colors.foreground },
                           isCorrect && showResult && styles.correctText,
                           isSelected && !isCorrect && showResult && styles.incorrectText,
                         ]}>
@@ -207,7 +202,7 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar barStyle="light-content" />
       
       <ScrollView 
@@ -244,24 +239,28 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
         </View>
 
         {/* Stats */}
-        <View style={styles.statsContainer}>
+        <View style={[styles.statsContainer, { 
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          shadowColor: colors.primary,
+        }]}>
           <View style={styles.statItem}>
             <Ionicons name="checkmark-circle" size={32} color="#10b981" />
-            <Text style={styles.statNumber}>{correctAnswers}</Text>
-            <Text style={styles.statLabel}>Correct</Text>
+            <Text style={[styles.statNumber, { color: colors.foreground }]}>{correctAnswers}</Text>
+            <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Correct</Text>
           </View>
-          <View style={styles.statDivider} />
+          <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
           <View style={styles.statItem}>
             <Ionicons name="close-circle" size={32} color="#EF4444" />
-            <Text style={styles.statNumber}>{totalQuestions - correctAnswers}</Text>
-            <Text style={styles.statLabel}>Incorrect</Text>
+            <Text style={[styles.statNumber, { color: colors.foreground }]}>{totalQuestions - correctAnswers}</Text>
+            <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Incorrect</Text>
           </View>
         </View>
 
         {/* Practice Section - Only show if there are incorrect questions */}
         {incorrectQuestions.length > 0 && (
           <TouchableOpacity
-            style={styles.reviewButton}
+            style={[styles.reviewButton, { shadowColor: colors.primary }]}
             onPress={() => {
               setViewMode('retest');
               setCurrentRetestIndex(0);
@@ -284,7 +283,7 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
         )}
 
         <TouchableOpacity
-          style={styles.homeButton}
+          style={[styles.homeButton, { shadowColor: colors.accent }]}
           onPress={() => navigation.navigate('Upload')}
           activeOpacity={0.8}
         >
@@ -304,7 +303,6 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
   },
   scrollView: {
     flex: 1,
@@ -386,13 +384,10 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     flexDirection: 'row',
-    backgroundColor: colors.card,
     borderRadius: 20,
     padding: 24,
     marginBottom: 32,
     borderWidth: 1,
-    borderColor: colors.border,
-    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
@@ -405,24 +400,20 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 32,
     fontWeight: '900',
-    color: colors.foreground,
     marginTop: 8,
   },
   statLabel: {
     fontSize: 14,
-    color: colors.mutedForeground,
     marginTop: 4,
   },
   statDivider: {
     width: 1,
-    backgroundColor: colors.border,
     marginHorizontal: 24,
   },
   reviewButton: {
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 16,
-    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -443,7 +434,6 @@ const styles = StyleSheet.create({
   homeButton: {
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: colors.accent,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -468,7 +458,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   backButton: {
     width: 40,
@@ -479,21 +468,17 @@ const styles = StyleSheet.create({
   reviewTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.foreground,
   },
   reviewScrollView: {
     flex: 1,
     width: width,
   },
   reviewItem: {
-    backgroundColor: colors.card,
     borderRadius: 20,
     padding: 24,
     marginHorizontal: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: colors.border,
-    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
@@ -511,7 +496,6 @@ const styles = StyleSheet.create({
   reviewItemNumber: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.mutedForeground,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
@@ -531,7 +515,6 @@ const styles = StyleSheet.create({
   reviewQuestion: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.foreground,
     marginBottom: 16,
     lineHeight: 26,
   },
@@ -543,7 +526,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderRadius: 16,
-    backgroundColor: colors.muted,
     borderWidth: 2,
     borderColor: 'transparent',
     gap: 12,
@@ -568,7 +550,6 @@ const styles = StyleSheet.create({
   reviewOptionText: {
     flex: 1,
     fontSize: 15,
-    color: colors.foreground,
     lineHeight: 22,
   },
   correctText: {

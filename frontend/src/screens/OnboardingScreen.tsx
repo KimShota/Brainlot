@@ -11,20 +11,9 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '../contexts/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
-
-const colors = {
-  background: '#1a1a28',
-  foreground: '#ffffff',
-  primary: '#8B5CF6',
-  secondary: '#A78BFA',
-  accent: '#60A5FA',
-  muted: '#252538',
-  mutedForeground: '#c0c0d0',
-  card: '#252538',
-  border: '#4a4a6e',
-};
 
 interface OnboardingScreenProps {
   onComplete: () => void;
@@ -66,6 +55,7 @@ const onboardingPages = [
 ];
 
 export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [currentPage, setCurrentPage] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -101,28 +91,28 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
   const currentSlide = onboardingPages[currentPage];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Skip Button */}
       <TouchableOpacity
         style={[styles.skipButton, { top: insets.top + 10 }]}
         onPress={handleSkip}
         activeOpacity={0.7}
       >
-        <Text style={styles.skipText}>Skip</Text>
+        <Text style={[styles.skipText, { color: colors.mutedForeground }]}>Skip</Text>
       </TouchableOpacity>
 
       {/* Content */}
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
         <LinearGradient
-          colors={currentSlide.gradient}
+          colors={currentSlide.gradient as [string, string]}
           style={styles.iconContainer}
         >
           <Ionicons name={currentSlide.icon as any} size={80} color="white" />
         </LinearGradient>
 
-        <Text style={styles.title}>{currentSlide.title}</Text>
-        <Text style={styles.subtitle}>{currentSlide.subtitle}</Text>
-        <Text style={styles.description}>{currentSlide.description}</Text>
+        <Text style={[styles.title, { color: colors.foreground }]}>{currentSlide.title}</Text>
+        <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{currentSlide.subtitle}</Text>
+        <Text style={[styles.description, { color: colors.mutedForeground }]}>{currentSlide.description}</Text>
       </Animated.View>
 
       {/* Dots Indicator */}
@@ -148,7 +138,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
         activeOpacity={0.9}
       >
         <LinearGradient
-          colors={currentSlide.gradient}
+          colors={currentSlide.gradient as [string, string]}
           style={styles.nextButtonGradient}
         >
           <Text style={styles.nextButtonText}>
@@ -168,7 +158,6 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
   },
   skipButton: {
     position: 'absolute',
@@ -176,7 +165,6 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   skipText: {
-    color: colors.mutedForeground,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -202,20 +190,17 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: '900',
-    color: colors.foreground,
     textAlign: 'center',
     marginBottom: 12,
   },
   subtitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: colors.mutedForeground,
     textAlign: 'center',
     marginBottom: 24,
   },
   description: {
     fontSize: 16,
-    color: colors.mutedForeground,
     textAlign: 'center',
     lineHeight: 24,
     paddingHorizontal: 20,

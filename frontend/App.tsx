@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
+import { ThemeProvider } from './src/contexts/ThemeContext';
 import AuthScreen from './src/screens/AuthScreen';
 import AppNavigator from "./AppNavigator";
 import SplashScreen from './src/components/SplashScreen';
@@ -111,13 +112,15 @@ export default function App() {
   
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <SubscriptionProvider>
-          <NavigationContainer linking={linking}>
-            <AppContent />
-          </NavigationContainer>
-        </SubscriptionProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <SubscriptionProvider>
+            <NavigationContainer linking={linking}>
+              <AppContent />
+            </NavigationContainer>
+          </SubscriptionProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

@@ -23,26 +23,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { log, error as logError } from '../lib/logger';
 import { getUserFriendlyError } from '../lib/errorUtils';
+import { useTheme } from '../contexts/ThemeContext';
 
 WebBrowser.maybeCompleteAuthSession();
-
-//color theme 
-const colors = {
-    background: '#1a1a28',
-    foreground: '#ffffff',
-    primary: '#8B5CF6',
-    secondary: '#A78BFA',
-    accent: '#60A5FA',
-    muted: '#252538',
-    mutedForeground: '#c0c0d0',
-    card: '#252538',
-    border: '#4a4a6e',
-    destructive: '#F87171',
-};
 
 
 //function to handle the authentication screen 
 export default function AuthScreen({ navigation }: any) {
+    const { colors } = useTheme();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isSignUp, setIsSignUp] = useState(false);
@@ -318,7 +306,7 @@ export default function AuthScreen({ navigation }: any) {
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
             
             <KeyboardAvoidingView
@@ -335,22 +323,26 @@ export default function AuthScreen({ navigation }: any) {
                         <View style={styles.header}>
                             <Image 
                                 source={require('../../assets/images/icon.png')}
-                                style={styles.logoImage}
+                                style={[styles.logoImage, { shadowColor: colors.primary }]}
                                 resizeMode="contain"
                             />
-                            <Text style={styles.title}>Brainlot</Text>
-                            <Text style={styles.subtitle}>
+                            <Text style={[styles.title, { color: colors.foreground }]}>Brainlot</Text>
+                            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
                                 {isSignUp ? 'Create your account' : 'Welcome back!'}
                             </Text>
                         </View>
 
                         {/* Form */}
                         <View style={styles.form}>
-                            <View style={styles.inputContainer}>
+                            <View style={[styles.inputContainer, { 
+                                backgroundColor: colors.card,
+                                borderColor: colors.border,
+                            }]}>
                                 <Ionicons name="mail" size={20} color={colors.mutedForeground} />
                                 <TextInput
-                                    style={styles.input}
+                                    style={[styles.input, { color: colors.foreground }]}
                                     placeholder="Email"
+                                    placeholderTextColor={colors.mutedForeground}
                                     value={email}
                                     onChangeText={setEmail}
                                     keyboardType="email-address"
@@ -358,11 +350,15 @@ export default function AuthScreen({ navigation }: any) {
                                 />
                             </View>
 
-                            <View style={styles.inputContainer}>
+                            <View style={[styles.inputContainer, { 
+                                backgroundColor: colors.card,
+                                borderColor: colors.border,
+                            }]}>
                                 <Ionicons name="lock-closed" size={20} color={colors.mutedForeground} />
                                 <TextInput
-                                    style={styles.input}
+                                    style={[styles.input, { color: colors.foreground }]}
                                     placeholder="Password"
+                                    placeholderTextColor={colors.mutedForeground}
                                     value={password}
                                     onChangeText={setPassword}
                                     secureTextEntry={!showPassword}
@@ -404,9 +400,9 @@ export default function AuthScreen({ navigation }: any) {
 
                             {/* Separator */}
                             <View style={styles.separatorRow}>
-                                <View style={styles.separatorLine} />
-                                <Text style={styles.separatorText}>Or continue with</Text>
-                                <View style={styles.separatorLine} />
+                                <View style={[styles.separatorLine, { backgroundColor: colors.border }]} />
+                                <Text style={[styles.separatorText, { color: colors.mutedForeground }]}>Or continue with</Text>
+                                <View style={[styles.separatorLine, { backgroundColor: colors.border }]} />
                             </View>
 
                             {/* OAuth buttons */}
@@ -421,7 +417,7 @@ export default function AuthScreen({ navigation }: any) {
                                 </TouchableOpacity>
 
                                 <TouchableOpacity
-                                    style={[styles.oauthButton, styles.oauthApple]}
+                                    style={[styles.oauthButton, styles.oauthApple, { borderColor: colors.border }]}
                                     onPress={handleAppleSignIn}
                                     disabled={loading}
                                 >
@@ -437,7 +433,7 @@ export default function AuthScreen({ navigation }: any) {
                                     setIsSignUp(!isSignUp);
                                 }}
                             >
-                                <Text style={styles.switchText}>
+                                <Text style={[styles.switchText, { color: colors.accent }]}>
                                     {isSignUp 
                                         ? 'Already have an account? Sign In' 
                                         : "Don't have an account? Sign Up"
@@ -456,7 +452,6 @@ export default function AuthScreen({ navigation }: any) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.background,
     },
     keyboardView: {
         flex: 1,
@@ -479,7 +474,6 @@ const styles = StyleSheet.create({
         height: 120,
         borderRadius: 24,
         marginBottom: 24,
-        shadowColor: colors.primary,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,
@@ -488,12 +482,10 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 32,
         fontWeight: '900',
-        color: colors.foreground,
         marginBottom: 8,
     },
     subtitle: {
         fontSize: 16,
-        color: colors.mutedForeground,
         fontWeight: '500',
     },
     form: {
@@ -502,18 +494,15 @@ const styles = StyleSheet.create({
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: colors.card,
         borderRadius: 16,
         paddingHorizontal: 16,
         paddingVertical: 16,
         borderWidth: 2,
-        borderColor: colors.border,
         gap: 12,
     },
     input: {
         flex: 1,
         fontSize: 16,
-        color: colors.foreground,
     },
     eyeButton: {
         padding: 4,
@@ -541,11 +530,9 @@ const styles = StyleSheet.create({
     separatorLine: {
         flex: 1,
         height: 1,
-        backgroundColor: colors.border,
     },
     separatorText: {
         fontSize: 12,
-        color: colors.mutedForeground,
         fontWeight: '600',
     },
     oauthRow: {
@@ -569,7 +556,6 @@ const styles = StyleSheet.create({
     },
     oauthApple: {
         backgroundColor: '#ffffff',
-        borderColor: colors.border,
     },
     oauthButtonText: {
         fontSize: 14,
@@ -582,7 +568,6 @@ const styles = StyleSheet.create({
     },
     switchText: {
         fontSize: 14,
-        color: colors.accent,
         fontWeight: '600',
     },
 });

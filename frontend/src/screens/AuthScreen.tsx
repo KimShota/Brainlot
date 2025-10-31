@@ -13,6 +13,7 @@ import {
     Platform,
     ScrollView,
     Modal,
+    Image,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
@@ -20,26 +21,16 @@ import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { log, error as logError } from '../lib/logger';
+import { getUserFriendlyError } from '../lib/errorUtils';
+import { useTheme } from '../contexts/ThemeContext';
 
 WebBrowser.maybeCompleteAuthSession();
-
-//color theme 
-const colors = {
-    background: '#f8fdf9',
-    foreground: '#1a1f2e',
-    primary: '#58cc02',
-    secondary: '#ff9600',
-    accent: '#1cb0f6',
-    muted: '#f0f9f1',
-    mutedForeground: '#6b7280',
-    card: '#ffffff',
-    border: '#e8f5e8',
-    destructive: '#dc2626',
-};
 
 
 //function to handle the authentication screen 
 export default function AuthScreen({ navigation }: any) {
+    const { colors } = useTheme();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isSignUp, setIsSignUp] = useState(false);
@@ -63,8 +54,8 @@ export default function AuthScreen({ navigation }: any) {
     //resend the confirmation email by sending HTTP request to the edge function
     const resendConfirmationEmail = async (email: string) => {
         try {
-            console.log('Attempting to resend confirmation email to:', email);
-            console.log('Using Edge Function URL:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`);
+            log('Attempting to resend confirmation email to:', email);
+            log('Using Edge Function URL:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`);
             
             //Send HTTP request with POST method to edge function with json string email 
             const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/resend-confirmation`, {
@@ -77,9 +68,9 @@ export default function AuthScreen({ navigation }: any) {
                 body: JSON.stringify({ email }),
             });
 
-            console.log('Edge Function response status:', response.status);
+            log('Edge Function response status:', response.status);
             const result = await response.json(); //take the http response body and convert it into Javascript object
-            console.log('Edge Function response:', result);
+            log('Edge Function response:', result);
 
             if (!response.ok || !result.ok) {
                 throw new Error(result.error || 'Failed to resend confirmation email');
@@ -91,7 +82,7 @@ export default function AuthScreen({ navigation }: any) {
                 'A new confirmation email has been sent to your email address. Please check your inbox and spam folder.'
             ); 
         } catch (error: any){
-            console.error('Resend confirmation email error:', error);
+            logError('Resend confirmation email error:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert('Error', error.message || 'Failed to resend confirmation email');
         }
@@ -103,7 +94,7 @@ export default function AuthScreen({ navigation }: any) {
         setLoading(true);
         try {
             const redirectTo = Linking.createURL('/'); //creates the deep link by adding / to it
-            console.log("Redirect URL is:", redirectTo); //return the URL of the login page of Google OAuth
+            log("Redirect URL is:", redirectTo); //return the URL of the login page of Google OAuth
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
@@ -228,9 +219,9 @@ export default function AuthScreen({ navigation }: any) {
         setLoading(true);
         try {
             if (isSignUp) { //if user is sigining up
-                console.log('Attempting to sign up user with email:', email);
-                console.log('Supabase URL:', process.env.EXPO_PUBLIC_SUPABASE_URL);
-                console.log('Supabase Anon Key exists:', !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+                log('Attempting to sign up user with email:', email);
+                log('Supabase URL:', process.env.EXPO_PUBLIC_SUPABASE_URL);
+                log('Supabase Anon Key exists:', !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
                 
                 const { data, error } = await supabase.auth.signUp({ //creates the user id and JWT token
                     email,
@@ -241,19 +232,19 @@ export default function AuthScreen({ navigation }: any) {
                 });
                 
                 if (error) {
-                    console.error('Sign up error:', error);
+                    logError('Sign up error:', error);
                     throw error;
                 }
                 
-                console.log('Sign up successful:', data);
-                console.log('User created:', data.user);
-                console.log('Session created:', data.session);
-                console.log('Email confirmation sent:', data.user?.email_confirmed_at === null);
+                log('Sign up successful:', data);
+                log('User created:', data.user);
+                log('Session created:', data.session);
+                log('Email confirmation sent:', data.user?.email_confirmed_at === null);
                 
                 // Check if email confirmation is required
                 if (data.user && !data.session) {
                     // Email confirmation is required
-                    console.log('Email confirmation required - user needs to verify email');
+                    log('Email confirmation required - user needs to verify email');
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                     Alert.alert(
                         'Check Your Email', 
@@ -265,34 +256,35 @@ export default function AuthScreen({ navigation }: any) {
                     );
                 } else if (data.session) {
                     // User is immediately signed in (email confirmation disabled)
-                    console.log('User immediately signed in - email confirmation disabled');
+                    log('User immediately signed in - email confirmation disabled');
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                     Alert.alert('Success', 'Account created successfully!');
                     // Navigation will be handled by AuthContext
                 } else {
-                    console.log('Unexpected signup result:', data);
+                    log('Unexpected signup result:', data);
                     Alert.alert('Success', 'Account created! Please check your email for verification.');
                 }
             } else { //if user has already signed up
-                console.log('Attempting to sign in user with email:', email);
+                log('Attempting to sign in user with email:', email);
                 const { data, error } = await supabase.auth.signInWithPassword({
                     email,
                     password,
                 });
                 
                 if (error) {
-                    console.error('Sign in error:', error);
+                    logError('Sign in error:', error);
                     throw error;
                 }
                 
-                console.log('Sign in successful:', data);
+                log('Sign in successful:', data);
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 // Navigation will be handled by AuthContext
             }
         } catch (error: any) { //handle any errors
-            console.error('Authentication error:', error);
+            logError('Authentication error:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
+            // Check for specific email verification error
             if (error.message?.toLowerCase().includes('email not confirmed')){
                 Alert.alert(
                     'Email Not Verified', 
@@ -302,16 +294,19 @@ export default function AuthScreen({ navigation }: any) {
                         { text: 'Resend', onPress: () => resendConfirmationEmail(email) }, 
                     ]
                 ); 
-            } else {
-                Alert.alert('Error', error.message || 'An error occurred during authentication');
+                return;
             }
+            
+            // Use user-friendly error message
+            const userFriendlyMessage = getUserFriendlyError(error);
+            Alert.alert('Error', userFriendlyMessage);
         } finally { //set loading to false
             setLoading(false);
         }
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
             
             <KeyboardAvoidingView
@@ -326,25 +321,28 @@ export default function AuthScreen({ navigation }: any) {
                     <View style={styles.content}>
                         {/* Header */}
                         <View style={styles.header}>
-                            <LinearGradient
-                                colors={[colors.primary, colors.accent]}
-                                style={styles.iconContainer}
-                            >
-                                <Ionicons name="school" size={48} color="white" />
-                            </LinearGradient>
-                            <Text style={styles.title}>Edu-Shorts</Text>
-                            <Text style={styles.subtitle}>
+                            <Image 
+                                source={require('../../assets/images/icon.png')}
+                                style={[styles.logoImage, { shadowColor: colors.primary }]}
+                                resizeMode="contain"
+                            />
+                            <Text style={[styles.title, { color: colors.foreground }]}>Brainlot</Text>
+                            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
                                 {isSignUp ? 'Create your account' : 'Welcome back!'}
                             </Text>
                         </View>
 
                         {/* Form */}
                         <View style={styles.form}>
-                            <View style={styles.inputContainer}>
+                            <View style={[styles.inputContainer, { 
+                                backgroundColor: colors.card,
+                                borderColor: colors.border,
+                            }]}>
                                 <Ionicons name="mail" size={20} color={colors.mutedForeground} />
                                 <TextInput
-                                    style={styles.input}
+                                    style={[styles.input, { color: colors.foreground }]}
                                     placeholder="Email"
+                                    placeholderTextColor={colors.mutedForeground}
                                     value={email}
                                     onChangeText={setEmail}
                                     keyboardType="email-address"
@@ -352,11 +350,15 @@ export default function AuthScreen({ navigation }: any) {
                                 />
                             </View>
 
-                            <View style={styles.inputContainer}>
+                            <View style={[styles.inputContainer, { 
+                                backgroundColor: colors.card,
+                                borderColor: colors.border,
+                            }]}>
                                 <Ionicons name="lock-closed" size={20} color={colors.mutedForeground} />
                                 <TextInput
-                                    style={styles.input}
+                                    style={[styles.input, { color: colors.foreground }]}
                                     placeholder="Password"
+                                    placeholderTextColor={colors.mutedForeground}
                                     value={password}
                                     onChangeText={setPassword}
                                     secureTextEntry={!showPassword}
@@ -398,9 +400,9 @@ export default function AuthScreen({ navigation }: any) {
 
                             {/* Separator */}
                             <View style={styles.separatorRow}>
-                                <View style={styles.separatorLine} />
-                                <Text style={styles.separatorText}>Or continue with</Text>
-                                <View style={styles.separatorLine} />
+                                <View style={[styles.separatorLine, { backgroundColor: colors.border }]} />
+                                <Text style={[styles.separatorText, { color: colors.mutedForeground }]}>Or continue with</Text>
+                                <View style={[styles.separatorLine, { backgroundColor: colors.border }]} />
                             </View>
 
                             {/* OAuth buttons */}
@@ -415,7 +417,7 @@ export default function AuthScreen({ navigation }: any) {
                                 </TouchableOpacity>
 
                                 <TouchableOpacity
-                                    style={[styles.oauthButton, styles.oauthApple]}
+                                    style={[styles.oauthButton, styles.oauthApple, { borderColor: colors.border }]}
                                     onPress={handleAppleSignIn}
                                     disabled={loading}
                                 >
@@ -431,7 +433,7 @@ export default function AuthScreen({ navigation }: any) {
                                     setIsSignUp(!isSignUp);
                                 }}
                             >
-                                <Text style={styles.switchText}>
+                                <Text style={[styles.switchText, { color: colors.accent }]}>
                                     {isSignUp 
                                         ? 'Already have an account? Sign In' 
                                         : "Don't have an account? Sign Up"
@@ -450,7 +452,6 @@ export default function AuthScreen({ navigation }: any) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.background,
     },
     keyboardView: {
         flex: 1,
@@ -468,14 +469,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 48,
     },
-    iconContainer: {
-        width: 96,
-        height: 96,
+    logoImage: {
+        width: 120,
+        height: 120,
         borderRadius: 24,
-        justifyContent: 'center',
-        alignItems: 'center',
         marginBottom: 24,
-        shadowColor: colors.primary,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,
@@ -484,12 +482,10 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 32,
         fontWeight: '900',
-        color: colors.foreground,
         marginBottom: 8,
     },
     subtitle: {
         fontSize: 16,
-        color: colors.mutedForeground,
         fontWeight: '500',
     },
     form: {
@@ -498,18 +494,15 @@ const styles = StyleSheet.create({
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: colors.card,
         borderRadius: 16,
         paddingHorizontal: 16,
         paddingVertical: 16,
         borderWidth: 2,
-        borderColor: colors.border,
         gap: 12,
     },
     input: {
         flex: 1,
         fontSize: 16,
-        color: colors.foreground,
     },
     eyeButton: {
         padding: 4,
@@ -537,11 +530,9 @@ const styles = StyleSheet.create({
     separatorLine: {
         flex: 1,
         height: 1,
-        backgroundColor: colors.border,
     },
     separatorText: {
         fontSize: 12,
-        color: colors.mutedForeground,
         fontWeight: '600',
     },
     oauthRow: {
@@ -565,7 +556,6 @@ const styles = StyleSheet.create({
     },
     oauthApple: {
         backgroundColor: '#ffffff',
-        borderColor: colors.border,
     },
     oauthButtonText: {
         fontSize: 14,
@@ -578,7 +568,6 @@ const styles = StyleSheet.create({
     },
     switchText: {
         fontSize: 14,
-        color: colors.accent,
         fontWeight: '600',
     },
 });

@@ -1,6 +1,6 @@
-# Edu-Shorts - MCQ Learning App 📚
+# Brainlot - AI-Powered Learning Platform 📚
 
-Edu-Shorts is a learning app that automatically generates MCQs (Multiple Choice Questions) from PDFs and images.
+Brainlot is a learning app that automatically generates MCQs (Multiple Choice Questions) from PDFs and images.
 
 ## Main Features
 

@@ -6,6 +6,7 @@ import {
   Animated,
   Dimensions,
   StatusBar,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -133,7 +134,7 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete }) => {
       
       {/* Background Gradient */}
       <LinearGradient
-        colors={['#4F46E5', '#7C3AED', '#EC4899']}
+        colors={['#7C3AED', '#A855F7', '#3B82F6']}
         style={styles.gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
@@ -191,12 +192,11 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete }) => {
               },
             ]}
           >
-            <LinearGradient
-              colors={['#FFFFFF', '#F8FAFC']}
-              style={styles.logoGradient}
-            >
-              <Ionicons name="school" size={80} color="#4F46E5" />
-            </LinearGradient>
+            <Image 
+              source={require('../../assets/images/icon.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
           </Animated.View>
 
           {/* App Title */}
@@ -209,7 +209,7 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onAnimationComplete }) => {
               },
             ]}
           >
-            <Text style={styles.appTitle}>Quiz Reels</Text>
+            <Text style={styles.appTitle}>Brainlot</Text>
             <Text style={styles.appSubtitle}>Learn • Practice • Master</Text>
           </Animated.View>
 
@@ -346,12 +346,10 @@ const styles = StyleSheet.create({
   logoContainer: {
     marginBottom: 40,
   },
-  logoGradient: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    justifyContent: 'center',
-    alignItems: 'center',
+  logoImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 40,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,

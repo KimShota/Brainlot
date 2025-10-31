@@ -12,21 +12,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSubscription } from '../contexts/SubscriptionContext';
-
-// Color theme
-const colors = {
-  background: '#f8fdf9',
-  foreground: '#1a1f2e',
-  primary: '#58cc02',
-  secondary: '#ff9600',
-  accent: '#1cb0f6',
-  muted: '#f0f9f1',
-  mutedForeground: '#6b7280',
-  card: '#ffffff',
-  border: '#e8f5e8',
-  destructive: '#dc2626',
-  gold: '#ffd700',
-};
+import { useTheme } from '../contexts/ThemeContext';
 
 interface SubscriptionScreenProps {
   navigation: any;
@@ -38,6 +24,7 @@ interface SubscriptionScreenProps {
 }
 
 export default function SubscriptionScreen({ navigation, route }: SubscriptionScreenProps) {
+  const { colors } = useTheme();
   const {
     planType,
     isProUser,
@@ -74,19 +61,19 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
 
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
-          style={styles.backButton}
+          style={[styles.backButton, { backgroundColor: `${colors.primary}15` }]}
           onPress={() => navigation.goBack()}
           activeOpacity={0.7}
         >
           <Ionicons name="arrow-back" size={24} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Choose Plan</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Choose Plan</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -94,16 +81,16 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
         {/* Hero Section */}
         <View style={styles.heroSection}>
           <LinearGradient
-            colors={[colors.gold, colors.secondary]}
-            style={styles.heroIconContainer}
+            colors={[colors.gold!, colors.secondary]}
+            style={[styles.heroIconContainer, { shadowColor: colors.gold }]}
           >
             <Ionicons name="trophy" size={48} color="white" />
           </LinearGradient>
-          <Text style={styles.heroTitle}>Learn Without Limits!</Text>
-          <Text style={styles.heroSubtitle}>
+          <Text style={[styles.heroTitle, { color: colors.foreground }]}>Learn Without Limits!</Text>
+          <Text style={[styles.heroSubtitle, { color: colors.mutedForeground }]}>
             {isProUser
               ? 'You are using Pro plan 🎉'
-              : `${uploadLimit - uploadCount} uploads remaining`}
+              : `${Math.max(0, uploadLimit - uploadCount)} uploads remaining`}
           </Text>
         </View>
 
@@ -124,12 +111,12 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
 
         {/* Free Plan Card */}
         <View style={[styles.planCard, !isProUser && styles.activePlanCard]}>
-          <View style={styles.planHeader}>
-            <View>
-              <Text style={styles.planName}>Free Plan</Text>
-              <Text style={styles.planPrice}>$0</Text>
-            </View>
-            <View style={styles.planIcon}>
+            <View style={styles.planHeader}>
+              <View>
+                <Text style={[styles.planName, { color: colors.foreground }]}>Free Plan</Text>
+                <Text style={[styles.planPrice, { color: colors.foreground }]}>$0</Text>
+              </View>
+              <View style={[styles.planIcon, { backgroundColor: `${colors.primary}15` }]}>
               <Ionicons name="rocket-outline" size={32} color={colors.primary} />
             </View>
           </View>
@@ -137,21 +124,21 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
           <View style={styles.featureList}>
             <View style={styles.featureItem}>
               <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-              <Text style={styles.featureText}>Up to 10 uploads</Text>
+              <Text style={[styles.featureText, { color: colors.foreground }]}>Up to 10 uploads</Text>
             </View>
             <View style={styles.featureItem}>
               <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-              <Text style={styles.featureText}>Generate 300 MCQs total</Text>
+              <Text style={[styles.featureText, { color: colors.foreground }]}>Generate 300 MCQs total</Text>
             </View>
             <View style={styles.featureItem}>
               <Ionicons name="close-circle" size={20} color={colors.mutedForeground} />
-              <Text style={[styles.featureText, styles.disabledFeature]}>Unlimited access</Text>
+              <Text style={[styles.featureText, styles.disabledFeature, { color: colors.mutedForeground }]}>Unlimited access</Text>
             </View>
           </View>
 
           {!isProUser && (
-            <View style={styles.currentBadge}>
-              <Text style={styles.currentBadgeText}>Current Plan</Text>
+            <View style={[styles.currentBadge, { backgroundColor: `${colors.primary}20` }]}>
+              <Text style={[styles.currentBadgeText, { color: colors.secondary }]}>Current Plan</Text>
             </View>
           )}
         </View>
@@ -162,19 +149,19 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
             colors={[`${colors.gold}15`, `${colors.secondary}15`]}
             style={styles.proGradient}
           >
-            <View style={styles.popularBadge}>
+            <View style={[styles.popularBadge, { backgroundColor: colors.gold }]}>
               <Text style={styles.popularBadgeText}>Popular</Text>
             </View>
 
             <View style={styles.planHeader}>
               <View>
-                <Text style={styles.planName}>Pro Plan</Text>
+                <Text style={[styles.planName, { color: colors.foreground }]}>Pro Plan</Text>
                 <View style={styles.priceContainer}>
-                  <Text style={styles.planPrice}>$5</Text>
-                  <Text style={styles.pricePeriod}>/month</Text>
+                  <Text style={[styles.planPrice, { color: colors.foreground }]}>$5</Text>
+                  <Text style={[styles.pricePeriod, { color: colors.mutedForeground }]}>/month</Text>
                 </View>
               </View>
-              <View style={[styles.planIcon, styles.proIcon]}>
+              <View style={[styles.planIcon, styles.proIcon, { backgroundColor: `${colors.gold}15` }]}>
                 <Ionicons name="sparkles" size={32} color={colors.gold} />
               </View>
             </View>
@@ -182,19 +169,19 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
             <View style={styles.featureList}>
               <View style={styles.featureItem}>
                 <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
-                <Text style={styles.featureText}>Unlimited uploads</Text>
+                <Text style={[styles.featureText, { color: colors.foreground }]}>Unlimited uploads</Text>
               </View>
               <View style={styles.featureItem}>
                 <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
-                <Text style={styles.featureText}>Unlimited MCQ generation</Text>
+                <Text style={[styles.featureText, { color: colors.foreground }]}>Unlimited MCQ generation</Text>
               </View>
               <View style={styles.featureItem}>
                 <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
-                <Text style={styles.featureText}>Priority support</Text>
+                <Text style={[styles.featureText, { color: colors.foreground }]}>Priority support</Text>
               </View>
               <View style={styles.featureItem}>
                 <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
-                <Text style={styles.featureText}>Ad-free</Text>
+                <Text style={[styles.featureText, { color: colors.foreground }]}>Ad-free</Text>
               </View>
             </View>
 
@@ -205,7 +192,7 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
                 activeOpacity={0.9}
               >
                 <LinearGradient
-                  colors={[colors.gold, colors.secondary]}
+                  colors={[colors.gold!, colors.secondary]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.upgradeButtonGradient}
@@ -217,8 +204,8 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
             )}
 
             {isProUser && (
-              <View style={styles.currentBadge}>
-                <Text style={styles.currentBadgeText}>Current Plan</Text>
+              <View style={[styles.currentBadge, { backgroundColor: `${colors.primary}20` }]}>
+                <Text style={[styles.currentBadgeText, { color: colors.secondary }]}>Current Plan</Text>
               </View>
             )}
           </LinearGradient>
@@ -230,24 +217,27 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
           onPress={handleRestore}
           activeOpacity={0.7}
         >
-          <Text style={styles.restoreButtonText}>Restore Purchases</Text>
+          <Text style={[styles.restoreButtonText, { color: colors.secondary }]}>Restore Purchases</Text>
         </TouchableOpacity>
 
         {/* Unsubscribe Button - Only show for Pro users */}
         {isProUser && (
           <TouchableOpacity
-            style={styles.unsubscribeButton}
+            style={[styles.unsubscribeButton, { 
+              backgroundColor: `${colors.destructive}15`,
+              borderColor: `${colors.destructive}30`,
+            }]}
             onPress={unsubscribeFromPro}
             activeOpacity={0.7}
           >
-            <Text style={styles.unsubscribeButtonText}>Unsubscribe from Pro</Text>
+            <Text style={[styles.unsubscribeButtonText, { color: colors.destructive }]}>Unsubscribe from Pro</Text>
           </TouchableOpacity>
         )}
 
         {/* Info Section */}
-        <View style={styles.infoSection}>
-          <Text style={styles.infoTitle}>💡 Tips</Text>
-          <Text style={styles.infoText}>
+        <View style={[styles.infoSection, { backgroundColor: `${colors.accent}10` }]}>
+          <Text style={[styles.infoTitle, { color: colors.foreground }]}>💡 Tips</Text>
+          <Text style={[styles.infoText, { color: colors.mutedForeground }]}>
             • Pro plan is $5/month and can be cancelled anytime{'\n'}
             • Purchases auto-renew{'\n'}
             • Free plan allows up to 10 uploads{'\n'}
@@ -262,7 +252,6 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
   },
   loadingContainer: {
     flex: 1,
@@ -275,20 +264,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 16,
-    backgroundColor: `${colors.primary}08`,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: `${colors.primary}15`,
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.foreground,
   },
   content: {
     flex: 1,
@@ -306,7 +292,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
-    shadowColor: colors.gold,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -315,12 +300,10 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 28,
     fontWeight: '900',
-    color: colors.foreground,
     marginBottom: 8,
   },
   heroSubtitle: {
     fontSize: 16,
-    color: colors.mutedForeground,
     textAlign: 'center',
   },
   currentPlanBadge: {
@@ -341,21 +324,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   planCard: {
-    backgroundColor: colors.card,
     borderRadius: 20,
     padding: 24,
     marginBottom: 16,
     borderWidth: 2,
-    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 3,
   },
-  activePlanCard: {
-    borderColor: colors.primary,
-  },
+  activePlanCard: {},
   proPlanCard: {
     padding: 0,
     overflow: 'hidden',
@@ -367,7 +346,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 16,
     right: 16,
-    backgroundColor: colors.gold,
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
@@ -386,7 +364,6 @@ const styles = StyleSheet.create({
   planName: {
     fontSize: 24,
     fontWeight: '900',
-    color: colors.foreground,
     marginBottom: 8,
   },
   priceContainer: {
@@ -396,24 +373,19 @@ const styles = StyleSheet.create({
   planPrice: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: colors.foreground,
   },
   pricePeriod: {
     fontSize: 16,
-    color: colors.mutedForeground,
     marginLeft: 4,
   },
   planIcon: {
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: `${colors.primary}15`,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  proIcon: {
-    backgroundColor: `${colors.gold}15`,
-  },
+  proIcon: {},
   featureList: {
     gap: 12,
   },
@@ -424,22 +396,18 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: 16,
-    color: colors.foreground,
   },
   disabledFeature: {
-    color: colors.mutedForeground,
     textDecorationLine: 'line-through',
   },
   currentBadge: {
     marginTop: 20,
-    backgroundColor: `${colors.primary}20`,
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 12,
     alignSelf: 'center',
   },
   currentBadgeText: {
-    color: colors.primary,
     fontWeight: 'bold',
     fontSize: 14,
   },
@@ -468,7 +436,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   restoreButtonText: {
-    color: colors.accent,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -478,18 +445,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     marginTop: 8,
     marginBottom: 24,
-    backgroundColor: `${colors.destructive}15`,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: `${colors.destructive}30`,
   },
   unsubscribeButtonText: {
-    color: colors.destructive,
     fontSize: 16,
     fontWeight: '600',
   },
   infoSection: {
-    backgroundColor: `${colors.accent}10`,
     padding: 20,
     borderRadius: 16,
     marginBottom: 32,
@@ -497,12 +460,10 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: colors.foreground,
     marginBottom: 12,
   },
   infoText: {
     fontSize: 14,
-    color: colors.mutedForeground,
     lineHeight: 22,
   },
 });

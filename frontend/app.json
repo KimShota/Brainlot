@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.brainlot.app",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow Brainlot to access your photo library to upload study materials",
         "NSCameraUsageDescription": "Allow Brainlot to access your camera to take pictures of study materials"
@@ -28,7 +28,7 @@
     },
     "android": {
       "package": "com.brainlot.app",
-      "versionCode": 1,
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#58cc02",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -63,11 +63,7 @@
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
-    "extra": {
-      "eas": {
-        "projectId": "your-project-id-here"
-      }
-    },
+    "privacy": "public",
     "plugins": [
       "expo-router",
       [
@@ -88,6 +84,12 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "your-expo-username"
+    "owner": "shotacademic",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "52311a61-db0a-4f39-ae17-2475b0104c1d"
+      }
+    }
   }
 }

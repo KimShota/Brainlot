@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+import { log, warn, error as logError } from '../lib/logger';
 
 //blueprint of an object 
 interface AuthContextType {
@@ -44,7 +45,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const value = await AsyncStorage.getItem('hasSeenOnboarding');
         setHasSeenOnboarding(value === 'true');
       } catch (error) {
-        console.error('Error checking onboarding:', error);
+        logError('Error checking onboarding:', error);
       }
     };
     checkOnboarding();
@@ -55,7 +56,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await AsyncStorage.setItem('hasSeenOnboarding', 'true');
       setHasSeenOnboarding(true);
     } catch (error) {
-      console.error('Error saving onboarding status:', error);
+      logError('Error saving onboarding status:', error);
     }
   };
 
@@ -70,7 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!mounted) return;
         
         if (error) {
-          console.error('Error getting initial session:', error);
+          logError('Error getting initial session:', error);
           setSession(null);
           setUser(null);
         } else {
@@ -78,14 +79,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(session?.user ?? null);
           
           if (!session) {
-            console.warn("No session active - redirect to login"); 
+            warn("No session active - redirect to login"); 
           } else {
-            console.log("Logged in as: ", session.user.id); 
-            console.log("JWT: ", session.access_token); 
+            log("User authenticated successfully"); 
           }
         }
       } catch (error) {
-        console.error('Error in getInitialSession:', error);
+        logError('Error in getInitialSession:', error);
         if (mounted) {
           setSession(null);
           setUser(null);
@@ -103,7 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state change:', event, session?.user?.id);
+      log('Auth state change:', event);
       
       if (!mounted) return;
       
@@ -112,9 +112,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
 
       if (session) {
-        console.log("Session updated: ", session.user.id); 
+        log("Session updated successfully"); 
       } else {
-        console.log("User signed out"); 
+        log("User signed out"); 
       }
     });
 

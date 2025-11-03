@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
 CREATE TABLE IF NOT EXISTS user_usage_stats (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    upload_count INTEGER DEFAULT 0,
+    uploads_this_month INTEGER DEFAULT 0,
     last_upload_at TIMESTAMPTZ,
     reset_at TIMESTAMPTZ DEFAULT now(),
     created_at TIMESTAMPTZ DEFAULT now(),
@@ -64,7 +64,7 @@ BEGIN
     VALUES (NEW.id, 'free', 'active');
     
     -- Create usage stats
-    INSERT INTO user_usage_stats (user_id, upload_count)
+    INSERT INTO user_usage_stats (user_id, uploads_this_month)
     VALUES (NEW.id, 0);
     
     RETURN NEW;

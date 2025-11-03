@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { log, error as logError } from '../lib/logger';
 
 type ThemeMode = 'light' | 'dark';
 
@@ -69,7 +70,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setThemeModeState(savedTheme);
       }
     } catch (error) {
-      console.log('Error loading theme:', error);
+      logError('Error loading theme:', error);
     }
   };
 
@@ -77,7 +78,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       await AsyncStorage.setItem('theme', mode);
     } catch (error) {
-      console.log('Error saving theme:', error);
+      logError('Error saving theme:', error);
     }
   };
 

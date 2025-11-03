@@ -219,9 +219,7 @@ export default function AuthScreen({ navigation }: any) {
         setLoading(true);
         try {
             if (isSignUp) { //if user is sigining up
-                log('Attempting to sign up user with email:', email);
-                log('Supabase URL:', process.env.EXPO_PUBLIC_SUPABASE_URL);
-                log('Supabase Anon Key exists:', !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+                log('Attempting to sign up user');
                 
                 const { data, error } = await supabase.auth.signUp({ //creates the user id and JWT token
                     email,

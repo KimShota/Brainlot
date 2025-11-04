@@ -40,8 +40,11 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
   // Get price from RevenueCat offerings
   const getProPrice = () => {
     if (offerings?.current?.availablePackages) {
+      // RevenueCat may use $rc_monthly or monthly as identifier
       const monthlyPackage = offerings.current.availablePackages.find(
-        pkg => pkg.identifier === 'monthly' || pkg.packageType === 'MONTHLY'
+        pkg => pkg.identifier === 'monthly' || 
+               pkg.identifier === '$rc_monthly' ||
+               pkg.packageType === 'MONTHLY'
       );
       if (monthlyPackage?.product.priceString) {
         return monthlyPackage.product.priceString;

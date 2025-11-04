@@ -189,6 +189,17 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         setOfferings(offerings);
 
         log('RevenueCat initialized successfully');
+        log('Offerings loaded:', {
+          hasCurrent: !!offerings.current,
+          identifier: offerings.current?.identifier,
+          availablePackages: offerings.current?.availablePackages.length || 0,
+          packageIdentifiers: offerings.current?.availablePackages.map(p => p.identifier) || []
+        });
+        
+        if (!offerings.current) {
+          logError('No current offering found!');
+          logError('All offerings:', Object.keys(offerings.all));
+        }
       } catch (error) {
         logError('Error initializing RevenueCat:', error);
       } finally {
@@ -305,9 +316,20 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
 
       // Find the monthly package
+      // RevenueCat may use $rc_monthly or monthly as identifier
       const packageToPurchase = offerings.current.availablePackages.find(
-        (pkg: PurchasesPackage) => pkg.identifier === 'monthly' || pkg.packageType === 'MONTHLY'
+        (pkg: PurchasesPackage) => 
+          pkg.identifier === 'monthly' || 
+          pkg.identifier === '$rc_monthly' ||
+          pkg.packageType === 'MONTHLY'
       );
+      
+      // Log available packages for debugging
+      log('Available packages:', offerings.current.availablePackages.map(p => ({
+        identifier: p.identifier,
+        type: p.packageType,
+        productId: p.product.identifier
+      })));
 
       if (!packageToPurchase) {
         Alert.alert('Error', 'Subscription package not found. Please contact support.');

@@ -82,7 +82,7 @@ async function getUserSubscription(userId: string, supabaseClient: any): Promise
   try {
     const { data, error } = await supabaseClient
       .from('user_subscriptions')
-      .select('subscription_type, status')
+      .select('plan_type, status')
       .eq('user_id', userId)
       .eq('status', 'active')
       .single();
@@ -91,7 +91,8 @@ async function getUserSubscription(userId: string, supabaseClient: any): Promise
       return 'FREE'; // Default to free if no subscription found
     }
     
-    return data.subscription_type || 'FREE';
+    // Map plan_type to subscription level
+    return data.plan_type === 'pro' ? 'PRO' : 'FREE';
   } catch (error) {
     console.error('Error fetching user subscription:', error);
     return 'FREE';

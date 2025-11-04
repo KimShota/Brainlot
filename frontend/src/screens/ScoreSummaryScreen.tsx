@@ -78,32 +78,46 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
 
   if (viewMode === 'retest') {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <StatusBar barStyle="light-content" />
         
         {/* Header */}
         <SafeAreaView style={{ backgroundColor: colors.background }}>
-          <View style={[styles.reviewHeader, { borderBottomColor: colors.border }]}>
-            <TouchableOpacity
-              onPress={() => {
-                setViewMode('summary');
-                setCurrentRetestIndex(0);
-                setRetestUserAnswers(new Map());
-                setRetestAnsweredQuestions(new Set());
-                setRetestCorrectAnswers(0);
-              }}
-              style={styles.backButton}
-            >
-              <Ionicons name="arrow-back" size={24} color={colors.foreground} />
-            </TouchableOpacity>
-            <Text style={[styles.reviewTitle, { color: colors.foreground }]}>Practice Incorrect Questions</Text>
-            <View style={{ width: 40 }} />
-          </View>
+          <LinearGradient
+            colors={[colors.primary, colors.accent]}
+            style={styles.reviewHeaderGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <View style={styles.reviewHeader}>
+              <TouchableOpacity
+                onPress={() => {
+                  setViewMode('summary');
+                  setCurrentRetestIndex(0);
+                  setRetestUserAnswers(new Map());
+                  setRetestAnsweredQuestions(new Set());
+                  setRetestCorrectAnswers(0);
+                }}
+                style={styles.backButton}
+              >
+                <Ionicons name="arrow-back" size={24} color="white" />
+              </TouchableOpacity>
+              <View style={styles.headerTitleContainer}>
+                <Ionicons name="school" size={20} color="white" style={{ marginRight: 8 }} />
+                <Text style={styles.reviewTitle}>Practice Mode</Text>
+              </View>
+              <View style={styles.progressBadge}>
+                <Text style={styles.progressText}>
+                  {currentRetestIndex + 1}/{incorrectQuestions.length}
+                </Text>
+              </View>
+            </View>
+          </LinearGradient>
         </SafeAreaView>
 
         {/* Retest Questions */}
         <ScrollView 
-          style={styles.reviewScrollView}
+          style={[styles.reviewScrollView, { backgroundColor: colors.background }]}
           showsVerticalScrollIndicator={false}
           pagingEnabled
           horizontal
@@ -114,84 +128,133 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
             const itemId = `retest-${index}-${item.question?.substring(0, 20)}`;
             const userAnswer = retestUserAnswers.get(itemId);
             const correctAnswer = item.answer_index;
+            const showResult = retestAnsweredQuestions.has(itemId);
 
             return (
-              <View key={itemId} style={[styles.reviewItem, { 
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-                shadowColor: colors.primary,
-              }]}>
-                <View style={styles.reviewItemHeader}>
-                  <Text style={[styles.reviewItemNumber, { color: colors.mutedForeground }]}>Question {index + 1} of {incorrectQuestions.length}</Text>
-                </View>
-                
-                <Text style={[styles.reviewQuestion, { color: colors.foreground }]}>{item.question}</Text>
-                
-                <View style={styles.reviewOptions}>
-                  {item.options.map((opt: string, idx: number) => {
-                    const isSelected = userAnswer === idx;
-                    const isCorrect = idx === correctAnswer;
-                    const showResult = retestAnsweredQuestions.has(itemId);
-
-                    return (
-                      <TouchableOpacity
-                        key={idx}
-                        onPress={() => {
-                          if (retestAnsweredQuestions.has(itemId)) return;
-                          
-                          setRetestAnsweredQuestions(prev => new Set(prev).add(itemId));
-                          setRetestUserAnswers(prev => new Map(prev).set(itemId, idx));
-                          
-                          if (isCorrect) {
-                            setRetestCorrectAnswers(prev => prev + 1);
-                          }
-                          
-                          // Auto-scroll to next question after delay
-                          if (index < incorrectQuestions.length - 1) {
-                            setTimeout(() => {
-                              setCurrentRetestIndex(index + 1);
-                              scrollViewRef.current?.scrollTo({ x: (index + 1) * width, animated: true });
-                            }, 1500);
-                          } else {
-                            // All questions answered, show summary
-                            setTimeout(() => {
-                              setViewMode('summary');
-                            }, 1500);
-                          }
-                        }}
+              <View key={itemId} style={styles.reviewItemContainer}>
+                <View style={[styles.reviewItem, { 
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  shadowColor: colors.primary,
+                }]}>
+                  {/* Progress indicator */}
+                  <View style={styles.progressIndicatorContainer}>
+                    {incorrectQuestions.map((_, i) => (
+                      <View
+                        key={i}
                         style={[
-                          styles.reviewOption,
-                          { backgroundColor: colors.muted },
-                          isSelected && !isCorrect && showResult && styles.incorrectAnswer,
-                          isCorrect && showResult && styles.correctAnswer,
+                          styles.progressDot,
+                          { backgroundColor: i <= index ? colors.primary : colors.border }
                         ]}
-                      >
-                        <Ionicons
-                          name={
-                            !showResult ? "ellipse-outline" :
-                            isCorrect ? "checkmark-circle" : 
-                            isSelected && !isCorrect ? "close-circle" : 
-                            "ellipse-outline"
-                          }
-                          size={20}
-                          color={
-                            !showResult ? colors.mutedForeground :
-                            isCorrect ? '#10b981' : 
-                            isSelected && !isCorrect ? '#EF4444' : 
-                            colors.mutedForeground
-                          }
-                        />
-                        <Text style={[
-                          styles.reviewOptionText,
-                          { color: colors.foreground },
-                          isCorrect && showResult && styles.correctText,
-                          isSelected && !isCorrect && showResult && styles.incorrectText,
-                        ]}>
-                          {opt}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                      />
+                    ))}
+                  </View>
+
+                  <View style={[styles.questionBadge, { backgroundColor: `${colors.primary}15` }]}>
+                    <Ionicons name="help-circle" size={16} color={colors.primary} />
+                    <Text style={[styles.questionBadgeText, { color: colors.primary }]}>
+                      Question {index + 1}
+                    </Text>
+                  </View>
+                  
+                  <Text style={[styles.reviewQuestion, { color: colors.foreground }]}>
+                    {item.question}
+                  </Text>
+                  
+                  <View style={styles.reviewOptions}>
+                    {item.options.map((opt: string, idx: number) => {
+                      const isSelected = userAnswer === idx;
+                      const isCorrect = idx === correctAnswer;
+
+                      return (
+                        <TouchableOpacity
+                          key={idx}
+                          onPress={() => {
+                            if (retestAnsweredQuestions.has(itemId)) return;
+                            
+                            setRetestAnsweredQuestions(prev => new Set(prev).add(itemId));
+                            setRetestUserAnswers(prev => new Map(prev).set(itemId, idx));
+                            
+                            if (isCorrect) {
+                              setRetestCorrectAnswers(prev => prev + 1);
+                            }
+                            
+                            // Auto-scroll to next question after delay
+                            if (index < incorrectQuestions.length - 1) {
+                              setTimeout(() => {
+                                setCurrentRetestIndex(index + 1);
+                                scrollViewRef.current?.scrollTo({ x: (index + 1) * width, animated: true });
+                              }, 1500);
+                            } else {
+                              // All questions answered, show summary
+                              setTimeout(() => {
+                                setViewMode('summary');
+                              }, 1500);
+                            }
+                          }}
+                          disabled={showResult}
+                          style={[
+                            styles.reviewOption,
+                            { 
+                              backgroundColor: colors.muted,
+                              borderColor: colors.border,
+                            },
+                            isSelected && !isCorrect && showResult && styles.incorrectAnswer,
+                            isCorrect && showResult && styles.correctAnswer,
+                            !showResult && styles.reviewOptionHover,
+                          ]}
+                        >
+                          <View style={[
+                            styles.optionIconContainer,
+                            { backgroundColor: colors.background }
+                          ]}>
+                            <Ionicons
+                              name={
+                                !showResult ? "ellipse-outline" :
+                                isCorrect ? "checkmark-circle" : 
+                                isSelected && !isCorrect ? "close-circle" : 
+                                "ellipse-outline"
+                              }
+                              size={20}
+                              color={
+                                !showResult ? colors.mutedForeground :
+                                isCorrect ? '#10b981' : 
+                                isSelected && !isCorrect ? '#EF4444' : 
+                                colors.mutedForeground
+                              }
+                            />
+                          </View>
+                          <Text style={[
+                            styles.reviewOptionText,
+                            { color: colors.foreground },
+                            isCorrect && showResult && styles.correctText,
+                            isSelected && !isCorrect && showResult && styles.incorrectText,
+                          ]}>
+                            {opt}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  {showResult && (
+                    <View style={[
+                      styles.resultBanner,
+                      { backgroundColor: userAnswer === correctAnswer ? '#10b98110' : '#EF444410' }
+                    ]}>
+                      <Ionicons
+                        name={userAnswer === correctAnswer ? "checkmark-circle" : "close-circle"}
+                        size={18}
+                        color={userAnswer === correctAnswer ? '#10b981' : '#EF4444'}
+                      />
+                      <Text style={[
+                        styles.resultText,
+                        { color: userAnswer === correctAnswer ? '#10b981' : '#EF4444' }
+                      ]}>
+                        {userAnswer === correctAnswer ? 'Correct! Great job! 🎉' : 'Keep practicing! 💪'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
             );
@@ -451,53 +514,99 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
+  reviewHeaderGradient: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+  },
   reviewHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
   },
   backButton: {
     width: 40,
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  headerTitleContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 12,
   },
   reviewTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
+    color: 'white',
+  },
+  progressBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  progressText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: 'white',
   },
   reviewScrollView: {
     flex: 1,
     width: width,
   },
+  reviewItemContainer: {
+    width: width,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+  },
   reviewItem: {
     borderRadius: 20,
-    padding: 24,
-    marginHorizontal: 20,
-    marginBottom: 16,
+    padding: 20,
     borderWidth: 1,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-    width: width - 40,
-    alignSelf: 'center',
-    minHeight: height * 0.6,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 6,
+    minHeight: height * 0.55,
   },
-  reviewItemHeader: {
+  progressIndicatorContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
+    gap: 6,
   },
-  reviewItemNumber: {
-    fontSize: 14,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+  progressDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  questionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginBottom: 12,
+    gap: 5,
+  },
+  questionBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   statusBadge: {
     flexDirection: 'row',
@@ -514,26 +623,37 @@ const styles = StyleSheet.create({
   },
   reviewQuestion: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '800',
     marginBottom: 16,
     lineHeight: 26,
   },
   reviewOptions: {
-    gap: 12,
+    gap: 10,
+    marginBottom: 12,
   },
   reviewOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    padding: 14,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: 'transparent',
     gap: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.06,
     shadowRadius: 4,
     elevation: 2,
+    minHeight: 52,
+  },
+  reviewOptionHover: {
+    transform: [{ scale: 1 }],
+  },
+  optionIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   incorrectAnswer: {
     borderColor: '#EF4444',
@@ -551,6 +671,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     lineHeight: 22,
+    fontWeight: '500',
   },
   correctText: {
     fontWeight: '700',
@@ -559,6 +680,21 @@ const styles = StyleSheet.create({
   incorrectText: {
     fontWeight: '700',
     color: '#EF4444',
+  },
+  resultBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 14,
+    gap: 8,
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.05)',
+  },
+  resultText: {
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
   },
 });
 

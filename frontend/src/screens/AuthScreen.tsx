@@ -93,7 +93,8 @@ export default function AuthScreen({ navigation }: any) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setLoading(true);
         try {
-            const redirectTo = Linking.createURL('/'); //creates the deep link by adding / to it
+            // Use explicit scheme for better reliability on physical devices
+            const redirectTo = 'brainlot://';
             log("Redirect URL is:", redirectTo); //return the URL of the login page of Google OAuth
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
@@ -114,13 +115,31 @@ export default function AuthScreen({ navigation }: any) {
                     redirectTo //deep link to the app
                 );
                 
+                log('WebBrowser result:', result.type);
+                
                 //If the browser is closed due to the redirect of the deep link, 
-                if (result.type === 'success') {
+                if (result.type === 'success' && 'url' in result) {
                     const url = result.url; //deep link URL to stay inside the app 
+                    log('Processing redirect URL:', url);
                     //extract the access token and refresh token from the deep link URL 
-                    const params = new URLSearchParams(url.split('#')[1] || url.split('?')[1]);
+                    // Try fragment first (OAuth 2.0 standard), then query params
+                    const hashIndex = url.indexOf('#');
+                    const queryIndex = url.indexOf('?');
+                    
+                    let params: URLSearchParams;
+                    if (hashIndex !== -1) {
+                        params = new URLSearchParams(url.substring(hashIndex + 1));
+                    } else if (queryIndex !== -1) {
+                        params = new URLSearchParams(url.substring(queryIndex + 1));
+                    } else {
+                        // Try to parse entire URL if no separator found
+                        params = new URLSearchParams(url);
+                    }
+                    
                     const accessToken = params.get('access_token');
                     const refreshToken = params.get('refresh_token');
+                    
+                    log('Extracted tokens:', { hasAccessToken: !!accessToken, hasRefreshToken: !!refreshToken });
                     
                     //If they both exist, 
                     if (accessToken && refreshToken) {
@@ -132,12 +151,25 @@ export default function AuthScreen({ navigation }: any) {
                         
                         // Navigation will be handled by AuthContext automatically
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    } else {
+                        // If tokens are not in URL, check if session was created automatically
+                        log('Tokens not found in URL, checking session...');
+                        const { data: { session } } = await supabase.auth.getSession();
+                        if (!session) {
+                            logError('No session found after OAuth redirect');
+                            Alert.alert('Sign In Error', 'Authentication may have failed. Please try again.');
+                        }
                     }
+                } else if (result.type === 'cancel') {
+                    log('User cancelled authentication');
+                } else {
+                    log('Unexpected result type:', result.type);
                 }
             }
         } catch (error: any) {
+            logError('Google sign-in error:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', error.message);
+            Alert.alert('Error', error.message || 'Failed to sign in with Google');
         } finally {
             setLoading(false);
         }
@@ -148,7 +180,8 @@ export default function AuthScreen({ navigation }: any) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setLoading(true);
         try {
-            const redirectTo = Linking.createURL('/'); //this probably contains confirmation URL
+            // Use explicit scheme for better reliability on physical devices
+            const redirectTo = 'brainlot://';
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'apple',
                 options: {
@@ -165,11 +198,27 @@ export default function AuthScreen({ navigation }: any) {
                     redirectTo
                 );
                 
-                if (result.type === 'success') {
+                log('Apple WebBrowser result:', result.type);
+                
+                if (result.type === 'success' && 'url' in result) {
                     const url = result.url;
-                    const params = new URLSearchParams(url.split('#')[1] || url.split('?')[1]);
+                    // Try fragment first (OAuth 2.0 standard), then query params
+                    const hashIndex = url.indexOf('#');
+                    const queryIndex = url.indexOf('?');
+                    
+                    let params: URLSearchParams;
+                    if (hashIndex !== -1) {
+                        params = new URLSearchParams(url.substring(hashIndex + 1));
+                    } else if (queryIndex !== -1) {
+                        params = new URLSearchParams(url.substring(queryIndex + 1));
+                    } else {
+                        params = new URLSearchParams(url);
+                    }
+                    
                     const accessToken = params.get('access_token');
                     const refreshToken = params.get('refresh_token');
+                    
+                    log('Extracted tokens:', { hasAccessToken: !!accessToken, hasRefreshToken: !!refreshToken });
                     
                     if (accessToken && refreshToken) {
                         await supabase.auth.setSession({
@@ -179,12 +228,23 @@ export default function AuthScreen({ navigation }: any) {
                         
                         // Navigation will be handled by AuthContext automatically
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    } else {
+                        // If tokens are not in URL, check if session was created automatically
+                        log('Tokens not found in URL, checking session...');
+                        const { data: { session } } = await supabase.auth.getSession();
+                        if (!session) {
+                            logError('No session found after OAuth redirect');
+                            Alert.alert('Sign In Error', 'Authentication may have failed. Please try again.');
+                        }
                     }
+                } else if (result.type === 'cancel') {
+                    log('User cancelled authentication');
                 }
             }
         } catch (error: any) {
+            logError('Apple sign-in error:', error);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Alert.alert('Error', error.message);
+            Alert.alert('Error', error.message || 'Failed to sign in with Apple');
         } finally {
             setLoading(false);
         }
@@ -219,9 +279,7 @@ export default function AuthScreen({ navigation }: any) {
         setLoading(true);
         try {
             if (isSignUp) { //if user is sigining up
-                log('Attempting to sign up user with email:', email);
-                log('Supabase URL:', process.env.EXPO_PUBLIC_SUPABASE_URL);
-                log('Supabase Anon Key exists:', !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+                log('Attempting to sign up user');
                 
                 const { data, error } = await supabase.auth.signUp({ //creates the user id and JWT token
                     email,

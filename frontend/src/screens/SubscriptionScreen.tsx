@@ -31,10 +31,27 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
     uploadCount,
     uploadLimit,
     loading,
+    offerings,
     purchasePro,
     restorePurchases,
     unsubscribeFromPro,
   } = useSubscription();
+
+  // Get price from RevenueCat offerings
+  const getProPrice = () => {
+    if (offerings?.current?.availablePackages) {
+      // RevenueCat may use $rc_monthly or monthly as identifier
+      const monthlyPackage = offerings.current.availablePackages.find(
+        pkg => pkg.identifier === 'monthly' || 
+               pkg.identifier === '$rc_monthly' ||
+               pkg.packageType === 'MONTHLY'
+      );
+      if (monthlyPackage?.product.priceString) {
+        return monthlyPackage.product.priceString;
+      }
+    }
+    return '$5/month'; // Fallback
+  };
 
   const source = route?.params?.source || 'settings';
 
@@ -154,13 +171,12 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
             </View>
 
             <View style={styles.planHeader}>
-              <View>
-                <Text style={[styles.planName, { color: colors.foreground }]}>Pro Plan</Text>
-                <View style={styles.priceContainer}>
-                  <Text style={[styles.planPrice, { color: colors.foreground }]}>$5</Text>
-                  <Text style={[styles.pricePeriod, { color: colors.mutedForeground }]}>/month</Text>
+                <View>
+                  <Text style={[styles.planName, { color: colors.foreground }]}>Pro Plan</Text>
+                  <View style={styles.priceContainer}>
+                    <Text style={[styles.planPrice, { color: colors.foreground }]}>{getProPrice()}</Text>
+                  </View>
                 </View>
-              </View>
               <View style={[styles.planIcon, styles.proIcon, { backgroundColor: `${colors.gold}15` }]}>
                 <Ionicons name="sparkles" size={32} color={colors.gold} />
               </View>
@@ -174,14 +190,6 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
               <View style={styles.featureItem}>
                 <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
                 <Text style={[styles.featureText, { color: colors.foreground }]}>Unlimited MCQ generation</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
-                <Text style={[styles.featureText, { color: colors.foreground }]}>Priority support</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
-                <Text style={[styles.featureText, { color: colors.foreground }]}>Ad-free</Text>
               </View>
             </View>
 
@@ -238,7 +246,7 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
         <View style={[styles.infoSection, { backgroundColor: `${colors.accent}10` }]}>
           <Text style={[styles.infoTitle, { color: colors.foreground }]}>💡 Tips</Text>
           <Text style={[styles.infoText, { color: colors.mutedForeground }]}>
-            • Pro plan is $5/month and can be cancelled anytime{'\n'}
+            • Pro plan is {getProPrice()} and can be cancelled anytime{'\n'}
             • Purchases auto-renew{'\n'}
             • Free plan allows up to 10 uploads{'\n'}
             • You can unsubscribe from Pro plan anytime

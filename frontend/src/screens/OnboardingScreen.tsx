@@ -48,7 +48,7 @@ const onboardingPages = [
     id: 4,
     title: "Pro Features",
     subtitle: "Unlimited Access",
-    description: "Upgrade to Pro for unlimited uploads, unlimited MCQ generation, and ad-free experience.",
+    description: "Upgrade to Pro for unlimited uploads, unlimited MCQ generation, and advanced progress tracking.",
     icon: "sparkles",
     gradient: ['#60A5FA', '#A78BFA'],
   },

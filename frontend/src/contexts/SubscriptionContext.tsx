@@ -1,30 +1,16 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
+import Purchases, { 
+  CustomerInfo,
+  PurchasesOfferings,
+  PurchasesPackage,
+} from 'react-native-purchases';
 import { supabase } from '../lib/supabase';
 import { log, error as logError } from '../lib/logger';
 import { useAuth } from './AuthContext';
 
-// Mock RevenueCat types for development
-interface MockCustomerInfo {
-  entitlements: {
-    active: { [key: string]: any };
-  };
-  originalAppUserId: string;
-}
-
-interface MockOffering {
-  availablePackages: {
-    identifier: string;
-    packageType: string;
-    product: {
-      identifier: string;
-      priceString: string;
-    };
-  }[];
-}
-
-export type PlanType = 'free' | 'pro'; //subscription plan types 
-export type SubscriptionStatus = 'active' | 'cancelled' | 'expired'; //subscription status 
+export type PlanType = 'free' | 'pro';
+export type SubscriptionStatus = 'active' | 'cancelled' | 'expired';
 
 // Subscription context interface
 interface SubscriptionContextType {
@@ -35,7 +21,7 @@ interface SubscriptionContextType {
   isProUser: boolean;
   canUpload: boolean;
   loading: boolean;
-  offerings: MockOffering | null;
+  offerings: PurchasesOfferings | null;
   purchasePro: () => Promise<void>;
   restorePurchases: () => Promise<void>;
   incrementUploadCount: () => Promise<void>;
@@ -48,7 +34,7 @@ interface SubscriptionContextType {
   nextUploadAllowedAt: Date | null;
 }
 
-//default values for the subscription context
+// Default values for the subscription context
 const SubscriptionContext = createContext<SubscriptionContextType>({
   planType: 'free',
   subscriptionStatus: 'active',
@@ -63,14 +49,13 @@ const SubscriptionContext = createContext<SubscriptionContextType>({
   incrementUploadCount: async () => {},
   refreshSubscription: async () => {},
   unsubscribeFromPro: async () => {},
-  // Rate limiting defaults
   canUploadNow: true,
   uploadsInLastHour: 0,
   uploadsInLastDay: 0,
   nextUploadAllowedAt: null,
 });
 
-//function to use the subscription context across my app 
+// Hook to use the subscription context
 export const useSubscription = () => {
   const context = useContext(SubscriptionContext);
   if (!context) {
@@ -81,47 +66,43 @@ export const useSubscription = () => {
 
 export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  const [planType, setPlanType] = useState<PlanType>('free'); //default plan is set to free
-  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>('active'); //set status to active 
-  const [uploadCount, setUploadCount] = useState(0); //set upload count to 0
-  const [loading, setLoading] = useState(true); //set loading to true 
-  const [offerings, setOfferings] = useState<MockOffering | null>(null); //set offerings to null 
+  const [planType, setPlanType] = useState<PlanType>('free');
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>('active');
+  const [uploadCount, setUploadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [offerings, setOfferings] = useState<PurchasesOfferings | null>(null);
   
-  //settings for rate limiting 
-  const [uploadsInLastHour, setUploadsInLastHour] = useState(0); //set uploads in last hour to 0
-  const [uploadsInLastDay, setUploadsInLastDay] = useState(0); //set uploads in last day to 0
-  const [nextUploadAllowedAt, setNextUploadAllowedAt] = useState<Date | null>(null); //set next upload allowed at to null 
-  const [recentUploads, setRecentUploads] = useState<Date[]>([]); //set recent uploads to an empty array 
+  // Rate limiting settings
+  const [uploadsInLastHour, setUploadsInLastHour] = useState(0);
+  const [uploadsInLastDay, setUploadsInLastDay] = useState(0);
+  const [nextUploadAllowedAt, setNextUploadAllowedAt] = useState<Date | null>(null);
+  const [recentUploads, setRecentUploads] = useState<Date[]>([]);
 
-  const uploadLimit = planType === 'pro' ? Infinity : 10; //if the user plan is pro, set the upload limit to infinity
-  const isProUser = planType === 'pro' && subscriptionStatus === 'active'; //if the user plan is pro, set isProUser to true 
-  const canUpload = isProUser || uploadCount < uploadLimit; //if the user is pro or if the upload count is less than upload limit, set canUpload to true 
+  const uploadLimit = planType === 'pro' ? Infinity : 10;
+  const isProUser = planType === 'pro' && subscriptionStatus === 'active';
+  const canUpload = isProUser || uploadCount < uploadLimit;
 
-  //Configurations for rate limits  
+  // Rate limit configurations
   const RATE_LIMITS = {
-    PRO_HOURLY_LIMIT: 20, //pro users can upload 20 files per hour 
-    PRO_DAILY_LIMIT: 100, //pro users can upload 100 files per day 
+    PRO_HOURLY_LIMIT: 20,
+    PRO_DAILY_LIMIT: 100,
   };
 
-  // Pure helper function to calculate rate limit values (no state updates)
+  // Helper function to calculate rate limit values
   const getRateLimitValues = (uploads: Date[], isPro: boolean) => {
-    const now = new Date(); //get the current time 
-    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000); //get the time one hour ago in milliseconds
-    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); //get the time one day ago 
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    const uploadsInHour = uploads.filter(date => date > oneHourAgo).length; //extract the number of uploads within the last one hour
-    const uploadsInDay = uploads.filter(date => date > oneDayAgo).length; //extract the number of uploads within the last one day
+    const uploadsInHour = uploads.filter(date => date > oneHourAgo).length;
+    const uploadsInDay = uploads.filter(date => date > oneDayAgo).length;
 
-    let canUploadNow = true; //set canUploadNow to true
-    let nextAllowedAt: Date | null = null; //set next allowed at to null
+    let canUploadNow = true;
+    let nextAllowedAt: Date | null = null;
 
-    //If the plan is pro, 
     if (isPro) {
-      //If the number of uploads within the last one hour exceeded the limit, restrict user from uploading 
       if (uploadsInHour >= RATE_LIMITS.PRO_HOURLY_LIMIT) {
         canUploadNow = false;
-
-        //calculate when the user is going to be able to upload again
         const oldestUploadInHour = uploads
           .filter(date => date > oneHourAgo)
           .sort((a, b) => a.getTime() - b.getTime())[0];
@@ -130,11 +111,8 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       }
 
-      //Check the daily limit for the pro user 
       if (uploadsInDay >= RATE_LIMITS.PRO_DAILY_LIMIT) {
         canUploadNow = false;
-
-        //calculate when the user is going to be able to upload again
         const oldestUploadInDay = uploads
           .filter(date => date > oneDayAgo)
           .sort((a, b) => a.getTime() - b.getTime())[0];
@@ -144,7 +122,6 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     }
 
-    //return the current state of the user in terms of rate limiting 
     return {
       uploadsInHour,
       uploadsInDay,
@@ -153,21 +130,18 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
   };
 
-  //Update rate limits whenever recentUploads changes or user's plan changes 
+  // Update rate limits whenever recentUploads changes or user's plan changes
   useEffect(() => {
-    const rateLimitValues = getRateLimitValues(recentUploads, isProUser); //get the rate limit for the user 
-    //update the values for the rate limits 
+    const rateLimitValues = getRateLimitValues(recentUploads, isProUser);
     setUploadsInLastHour(rateLimitValues.uploadsInHour);
     setUploadsInLastDay(rateLimitValues.uploadsInDay);
     setNextUploadAllowedAt(rateLimitValues.nextAllowedAt);
 
-    //update the rate-limit state right when the user is allowed to upload a file again
     if (rateLimitValues.nextAllowedAt) {
       const now = new Date();
-      const timeUntilNext = rateLimitValues.nextAllowedAt.getTime() - now.getTime(); //calculate the time until the user can upload a file again
+      const timeUntilNext = rateLimitValues.nextAllowedAt.getTime() - now.getTime();
       if (timeUntilNext > 0) {
         const timer = setTimeout(() => {
-          // Trigger a re-calculation by updating a dummy state
           setRecentUploads(prev => [...prev]);
         }, timeUntilNext);
         
@@ -176,36 +150,126 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, [recentUploads, isProUser]);
 
-  // Mock RevenueCat initialization
+  // Initialize RevenueCat
   useEffect(() => {
-    const initializeMockRevenueCat = async () => {
+    const initializeRevenueCat = async () => {
       try {
-        //Simulate API call delay, stopping for one second
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Get platform-specific API key
+        const iosApiKey = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS;
+        const androidApiKey = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID;
+        const fallbackApiKey = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY; // For backwards compatibility
         
-        // Mock offerings
-        const mockOfferings: MockOffering = {
-          availablePackages: [
-            {
-              identifier: 'monthly', //identifies which package we are using in the revenuecat 
-              packageType: 'MONTHLY',
-              product: {
-                identifier: 'pro_monthly',
-                priceString: '¥600',
-              },
-            },
-          ],
-        };
+        // Select API key based on platform
+        let apiKey: string | undefined;
+        if (Platform.OS === 'ios' && iosApiKey) {
+          apiKey = iosApiKey;
+        } else if (Platform.OS === 'android' && androidApiKey) {
+          apiKey = androidApiKey;
+        } else if (fallbackApiKey) {
+          apiKey = fallbackApiKey;
+        }
         
-        setOfferings(mockOfferings);
-        log('Mock RevenueCat initialized'); //print only during development mode
+        if (!apiKey) {
+          const platform = Platform.OS === 'ios' ? 'iOS' : 'Android';
+          logError(`RevenueCat API key not found for ${platform}. Please add EXPO_PUBLIC_REVENUECAT_API_KEY_${Platform.OS.toUpperCase()} or EXPO_PUBLIC_REVENUECAT_API_KEY to your .env file.`);
+          setLoading(false);
+          return;
+        }
+
+        // Configure RevenueCat
+        await Purchases.configure({ apiKey });
+
+        // Set app user ID if user is logged in
+        if (user?.id) {
+          await Purchases.logIn(user.id);
+        }
+
+        // Fetch offerings
+        const offerings = await Purchases.getOfferings();
+        setOfferings(offerings);
+
+        log('RevenueCat initialized successfully');
+        log('Offerings loaded:', {
+          hasCurrent: !!offerings.current,
+          identifier: offerings.current?.identifier,
+          availablePackages: offerings.current?.availablePackages.length || 0,
+          packageIdentifiers: offerings.current?.availablePackages.map(p => p.identifier) || []
+        });
+        
+        if (!offerings.current) {
+          logError('No current offering found!');
+          logError('All offerings:', Object.keys(offerings.all));
+        }
       } catch (error) {
-        logError('Error initializing mock RevenueCat:', error);
+        logError('Error initializing RevenueCat:', error);
+      } finally {
+        setLoading(false);
       }
     };
 
-    initializeMockRevenueCat(); //mock the revenue cat
+    initializeRevenueCat();
   }, []);
+
+  // Link RevenueCat user when auth state changes
+  useEffect(() => {
+    const linkRevenueCatUser = async () => {
+      if (user?.id) {
+        try {
+          await Purchases.logIn(user.id);
+          log('RevenueCat user linked:', user.id);
+          
+          // Refresh customer info after linking
+          const customerInfo = await Purchases.getCustomerInfo();
+          await syncWithSupabase(customerInfo);
+        } catch (error) {
+          logError('Error linking RevenueCat user:', error);
+        }
+      } else {
+        // Log out when user signs out
+        try {
+          await Purchases.logOut();
+          log('RevenueCat user logged out');
+        } catch (error) {
+          logError('Error logging out RevenueCat user:', error);
+        }
+      }
+    };
+
+    linkRevenueCatUser();
+  }, [user?.id]);
+
+  // Sync subscription status with Supabase
+  const syncWithSupabase = async (customerInfo: CustomerInfo) => {
+    if (!user) return;
+
+    try {
+      const isProActive = customerInfo.entitlements.active['pro'] !== undefined;
+
+      // Update Supabase subscription
+      const { error } = await supabase
+        .from('user_subscriptions')
+        .upsert({
+          user_id: user.id,
+          plan_type: isProActive ? 'pro' : 'free',
+          status: isProActive ? 'active' : 'cancelled',
+          revenue_cat_customer_id: customerInfo.originalAppUserId,
+          revenue_cat_subscription_id: customerInfo.entitlements.active['pro']?.productIdentifier || null,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id'
+        });
+
+      if (error) {
+        logError('Error syncing subscription to Supabase:', error);
+      } else {
+        setPlanType(isProActive ? 'pro' : 'free');
+        setSubscriptionStatus(isProActive ? 'active' : 'cancelled');
+        log('Subscription synced with Supabase:', isProActive ? 'pro' : 'free');
+      }
+    } catch (error) {
+      logError('Error in syncWithSupabase:', error);
+    }
+  };
 
   // Fetch subscription data from Supabase
   const fetchSubscriptionData = async () => {
@@ -215,26 +279,16 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     try {
-
-      //authenticate the user 
-      const { data: { session } } = await supabase.auth.getSession();
-      log(session?.access_token); //prints out the JWT token 
-
-      //get the subscription data for the user 
-      const { data: subscription, error: subError } = await supabase
-        .from('user_subscriptions')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-
-      if (subError && subError.code !== 'PGRST116') { //PGRST116 means no rows returned
-        logError('Error fetching subscription:', subError);
-      } else if (subscription) {
-        setPlanType(subscription.plan_type as PlanType);
-        setSubscriptionStatus(subscription.status as SubscriptionStatus);
+      // First, get latest customer info from RevenueCat
+      try {
+        const customerInfo = await Purchases.getCustomerInfo();
+        await syncWithSupabase(customerInfo);
+      } catch (rcError) {
+        logError('Error fetching RevenueCat customer info:', rcError);
+        // Fallback to Supabase if RevenueCat fails
       }
 
-      //get usage stats for the user
+      // Get usage stats from Supabase
       const { data: usage, error: usageError } = await supabase
         .from('user_usage_stats')
         .select('*')
@@ -253,78 +307,129 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
-  // Mock sync with Supabase
-  const syncMockWithSupabase = async (isProSubscribed: boolean) => {
-    if (!user) return;
-
-    try {
-      // Update Supabase subscription
-      const { error } = await supabase
-        .from('user_subscriptions')
-        .update({
-          plan_type: isProSubscribed ? 'pro' : 'free',
-          status: 'active',
-          revenue_cat_customer_id: `mock_${user.id}`,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', user.id);
-
-      if (error) {
-        logError('Error syncing subscription:', error);
-      } else {
-        setPlanType(isProSubscribed ? 'pro' : 'free');
-        setSubscriptionStatus('active');
-      }
-    } catch (error) {
-      logError('Error in syncMockWithSupabase:', error);
-    }
-  };
-
-  // Mock purchase Pro plan
+  // Purchase Pro plan
   const purchasePro = async () => {
     try {
-      // Simulate purchase process
+      // Try to refresh offerings if not available
+      let currentOfferings = offerings;
+      
+      if (!currentOfferings || !currentOfferings.current) {
+        log('Offerings not available, attempting to refresh...');
+        try {
+          log('Fetching fresh offerings from RevenueCat...');
+          const refreshedOfferings = await Purchases.getOfferings();
+          setOfferings(refreshedOfferings);
+          currentOfferings = refreshedOfferings;
+          
+          log('Refreshed offerings:', {
+            hasCurrent: !!refreshedOfferings.current,
+            identifier: refreshedOfferings.current?.identifier,
+            availablePackages: refreshedOfferings.current?.availablePackages.length || 0
+          });
+          
+          if (!refreshedOfferings || !refreshedOfferings.current) {
+            logError('Offerings still not available after refresh');
+            logError('All available offerings:', Object.keys(refreshedOfferings.all || {}));
+            
+            Alert.alert(
+              'Unable to Load Subscriptions',
+              'Please check your internet connection and try again. If the problem persists, the subscription service may not be configured yet. Please check RevenueCat Dashboard settings.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Retry', onPress: () => purchasePro() }
+              ]
+            );
+            return;
+          }
+        } catch (refreshError) {
+          logError('Error refreshing offerings:', refreshError);
+          Alert.alert(
+            'Connection Error',
+            'Unable to connect to subscription service. Please check your internet connection and try again.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Retry', onPress: () => purchasePro() }
+            ]
+          );
+          return;
+        }
+      }
+
+      // Use current offerings (either original or refreshed)
+      if (!currentOfferings.current) {
+        Alert.alert('Error', 'Subscription service is not available. Please try again later.');
+        return;
+      }
+
+      // Find the monthly package
+      // RevenueCat may use $rc_monthly or monthly as identifier
+      const packageToPurchase = currentOfferings.current.availablePackages.find(
+        (pkg: PurchasesPackage) => 
+          pkg.identifier === 'monthly' || 
+          pkg.identifier === '$rc_monthly' ||
+          pkg.packageType === 'MONTHLY'
+      );
+      
+      // Log available packages for debugging
+      log('Available packages:', currentOfferings.current.availablePackages.map(p => ({
+        identifier: p.identifier,
+        type: p.packageType,
+        productId: p.product.identifier
+      })));
+
+      if (!packageToPurchase) {
+        logError('Monthly package not found. Available packages:', currentOfferings.current.availablePackages.map(p => ({
+          id: p.identifier,
+          type: p.packageType,
+          productId: p.product.identifier
+        })));
+        
         Alert.alert(
-          'Development Mode',
-          'This is a mock implementation for development. No actual payment will be processed.',
+          'Package Not Found',
+          'The subscription package is not configured. Please contact support or try again later.',
           [
             { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Enable Pro Plan (Test)', 
-              onPress: async () => {
-                await syncMockWithSupabase(true);
-                Alert.alert(
-                  'Test Complete!',
-                  'Pro plan has been enabled (Development Mode)'
-                );
-              }
-            }
+            { text: 'Retry', onPress: () => purchasePro() }
           ]
         );
+        return;
+      }
+
+      // Purchase the package
+      const { customerInfo } = await Purchases.purchasePackage(packageToPurchase);
+
+      // Sync with Supabase
+      await syncWithSupabase(customerInfo);
+
+      Alert.alert('Success', 'Pro plan purchased successfully!');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'An error occurred during purchase');
+      if (error.userCancelled) {
+        // User cancelled, no action needed
+        return;
+      }
+      
+      logError('Purchase error:', error);
+      logError('Purchase error details:', JSON.stringify(error, null, 2));
+      Alert.alert('Purchase Failed', error.message || 'An error occurred during purchase. Please try again.');
     }
   };
 
-  // Mock restore purchases
+  // Restore purchases
   const restorePurchases = async () => {
     try {
-        Alert.alert(
-          'Development Mode',
-          'This is a mock implementation for development. No actual purchase restoration will be performed.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Restore Pro Plan (Test)', 
-              onPress: async () => {
-                await syncMockWithSupabase(true);
-                Alert.alert('Test Complete', 'Pro plan has been restored (Development Mode)');
-              }
-            }
-          ]
-        );
+      const customerInfo = await Purchases.restorePurchases();
+
+      const isProActive = customerInfo.entitlements.active['pro'] !== undefined;
+
+      if (isProActive) {
+        await syncWithSupabase(customerInfo);
+        Alert.alert('Success', 'Purchases restored successfully!');
+      } else {
+        Alert.alert('No Purchases Found', 'No active subscriptions found on this account.');
+      }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'An error occurred during purchase restoration');
+      logError('Restore purchases error:', error);
+      Alert.alert('Error', error.message || 'Failed to restore purchases. Please try again.');
     }
   };
 
@@ -332,7 +437,7 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const incrementUploadCount = async () => {
     if (!user) return;
 
-    // Check rate limits for Pro users using the pure helper function
+    // Check rate limits for Pro users
     const rateLimitValues = getRateLimitValues(recentUploads, isProUser);
     if (isProUser && !rateLimitValues.canUploadNow) {
       throw new Error('Rate limit exceeded. Please wait before uploading again.');
@@ -349,7 +454,6 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         .from('user_usage_stats')
         .update({
           uploads_this_month: newCount,
-          // last_upload_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq('user_id', user.id);
@@ -360,28 +464,34 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         setUploadCount(newCount);
       }
     } catch (error) {
-      logError('Error in incrementUploadCount:', error);
+      logError('Error in incrementing upload count:', error);
       throw error;
     }
   };
 
-  // Mock unsubscribe from Pro plan
+  // Unsubscribe from Pro plan (cancel subscription)
   const unsubscribeFromPro = async () => {
     try {
       Alert.alert(
         'Unsubscribe from Pro',
-        'Are you sure you want to unsubscribe from Pro plan? You will lose access to unlimited uploads.',
+        'Are you sure you want to cancel your Pro subscription? You will lose access to unlimited uploads after your current billing period ends.',
         [
           { text: 'Cancel', style: 'cancel' },
           { 
-            text: 'Unsubscribe', 
+            text: 'Cancel Subscription', 
             style: 'destructive',
             onPress: async () => {
-              await syncMockWithSupabase(false);
-              Alert.alert(
-                'Unsubscribed',
-                'You have successfully unsubscribed from Pro plan. You are now on the free plan.'
-              );
+              try {
+                // Note: RevenueCat doesn't provide a direct cancel method
+                // Users need to cancel through App Store/Play Store
+                Alert.alert(
+                  'Cancel Subscription',
+                  'To cancel your subscription:\n\niOS: Settings → Apple ID → Subscriptions\n\nAndroid: Play Store → Subscriptions',
+                  [{ text: 'OK' }]
+                );
+              } catch (error: any) {
+                Alert.alert('Error', error.message || 'An error occurred');
+              }
             }
           }
         ]
@@ -394,7 +504,18 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // Refresh subscription data
   const refreshSubscription = async () => {
     setLoading(true);
-    await fetchSubscriptionData();
+    try {
+      // Fetch latest from RevenueCat
+      const customerInfo = await Purchases.getCustomerInfo();
+      await syncWithSupabase(customerInfo);
+      
+      // Fetch usage stats
+      await fetchSubscriptionData();
+    } catch (error) {
+      logError('Error refreshing subscription:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Listen to auth state and fetch subscription data
@@ -425,7 +546,6 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
         incrementUploadCount,
         refreshSubscription,
         unsubscribeFromPro,
-        // Rate limiting values - derive canUploadNow from state instead of calling function
         canUploadNow: isProUser ? (nextUploadAllowedAt === null || nextUploadAllowedAt <= new Date()) : true,
         uploadsInLastHour,
         uploadsInLastDay,

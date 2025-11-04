@@ -310,14 +310,60 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // Purchase Pro plan
   const purchasePro = async () => {
     try {
-      if (!offerings || !offerings.current) {
-        Alert.alert('Error', 'Unable to load subscription options. Please try again later.');
+      // Try to refresh offerings if not available
+      let currentOfferings = offerings;
+      
+      if (!currentOfferings || !currentOfferings.current) {
+        log('Offerings not available, attempting to refresh...');
+        try {
+          log('Fetching fresh offerings from RevenueCat...');
+          const refreshedOfferings = await Purchases.getOfferings();
+          setOfferings(refreshedOfferings);
+          currentOfferings = refreshedOfferings;
+          
+          log('Refreshed offerings:', {
+            hasCurrent: !!refreshedOfferings.current,
+            identifier: refreshedOfferings.current?.identifier,
+            availablePackages: refreshedOfferings.current?.availablePackages.length || 0
+          });
+          
+          if (!refreshedOfferings || !refreshedOfferings.current) {
+            logError('Offerings still not available after refresh');
+            logError('All available offerings:', Object.keys(refreshedOfferings.all || {}));
+            
+            Alert.alert(
+              'Unable to Load Subscriptions',
+              'Please check your internet connection and try again. If the problem persists, the subscription service may not be configured yet. Please check RevenueCat Dashboard settings.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Retry', onPress: () => purchasePro() }
+              ]
+            );
+            return;
+          }
+        } catch (refreshError) {
+          logError('Error refreshing offerings:', refreshError);
+          Alert.alert(
+            'Connection Error',
+            'Unable to connect to subscription service. Please check your internet connection and try again.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Retry', onPress: () => purchasePro() }
+            ]
+          );
+          return;
+        }
+      }
+
+      // Use current offerings (either original or refreshed)
+      if (!currentOfferings.current) {
+        Alert.alert('Error', 'Subscription service is not available. Please try again later.');
         return;
       }
 
       // Find the monthly package
       // RevenueCat may use $rc_monthly or monthly as identifier
-      const packageToPurchase = offerings.current.availablePackages.find(
+      const packageToPurchase = currentOfferings.current.availablePackages.find(
         (pkg: PurchasesPackage) => 
           pkg.identifier === 'monthly' || 
           pkg.identifier === '$rc_monthly' ||
@@ -325,14 +371,27 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
       );
       
       // Log available packages for debugging
-      log('Available packages:', offerings.current.availablePackages.map(p => ({
+      log('Available packages:', currentOfferings.current.availablePackages.map(p => ({
         identifier: p.identifier,
         type: p.packageType,
         productId: p.product.identifier
       })));
 
       if (!packageToPurchase) {
-        Alert.alert('Error', 'Subscription package not found. Please contact support.');
+        logError('Monthly package not found. Available packages:', currentOfferings.current.availablePackages.map(p => ({
+          id: p.identifier,
+          type: p.packageType,
+          productId: p.product.identifier
+        })));
+        
+        Alert.alert(
+          'Package Not Found',
+          'The subscription package is not configured. Please contact support or try again later.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Retry', onPress: () => purchasePro() }
+          ]
+        );
         return;
       }
 
@@ -350,6 +409,7 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
       
       logError('Purchase error:', error);
+      logError('Purchase error details:', JSON.stringify(error, null, 2));
       Alert.alert('Purchase Failed', error.message || 'An error occurred during purchase. Please try again.');
     }
   };

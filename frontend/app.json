@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.brainlot.app",
-      "buildNumber": "3",
+      "buildNumber": "6",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow Brainlot to access your photo library to upload study materials",
         "NSCameraUsageDescription": "Allow Brainlot to access your camera to take pictures of study materials"
@@ -28,7 +28,7 @@
     },
     "android": {
       "package": "com.brainlot.app",
-      "versionCode": 3,
+      "versionCode": 6,
       "adaptiveIcon": {
         "backgroundColor": "#58cc02",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

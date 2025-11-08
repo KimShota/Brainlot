@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Alert, Platform, AppState, AppStateStatus } from 'react-native';
 import Purchases, { 
   CustomerInfo,
   PurchasesOfferings,
@@ -240,34 +240,111 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // Sync subscription status with Supabase
   const syncWithSupabase = async (customerInfo: CustomerInfo) => {
-    if (!user) return;
+    if (!user) {
+      logError('syncWithSupabase: No user found');
+      return;
+    }
 
     try {
-      const isProActive = customerInfo.entitlements.active['pro'] !== undefined;
+      // Log customer info for debugging
+      log('CustomerInfo received:', {
+        originalAppUserId: customerInfo.originalAppUserId,
+        activeEntitlements: Object.keys(customerInfo.entitlements.active),
+        allEntitlements: Object.keys(customerInfo.entitlements.all),
+        activeEntitlementDetails: Object.entries(customerInfo.entitlements.active).map(([key, value]) => ({
+          key,
+          identifier: value.identifier,
+          productIdentifier: value.productIdentifier,
+          isActive: value.isActive,
+        })),
+      });
+
+      // Check for pro entitlement - try multiple possible names
+      const proEntitlement = customerInfo.entitlements.active['pro'] || 
+                            customerInfo.entitlements.active['Pro'] ||
+                            customerInfo.entitlements.active['PRO'] ||
+                            Object.values(customerInfo.entitlements.active).find(
+                              (entitlement: any) => 
+                                entitlement.identifier?.toLowerCase().includes('pro') ||
+                                entitlement.productIdentifier?.toLowerCase().includes('pro')
+                            );
+      
+      // Check if subscription is truly active (not cancelled and not expired)
+      // RevenueCat keeps cancelled subscriptions in active until expiration date
+      let isProActive = false;
+      if (proEntitlement) {
+        // willRenew can be boolean, string, or null - convert to boolean
+        const willRenewValue = proEntitlement.willRenew;
+        const willRenew: boolean = typeof willRenewValue === 'boolean' 
+          ? willRenewValue 
+          : (willRenewValue !== null && willRenewValue !== false && willRenewValue !== 'false');
+        const expirationDate = proEntitlement.expirationDate;
+        const now = new Date();
+        
+        // Subscription is active if:
+        // 1. It will renew (not cancelled), OR
+        // 2. It hasn't expired yet (even if cancelled, user has access until expiration)
+        const isNotExpired = expirationDate ? new Date(expirationDate) > now : false;
+        isProActive = willRenew || isNotExpired;
+        
+        log('Subscription status check:', {
+          willRenew,
+          expirationDate,
+          isExpired: expirationDate ? new Date(expirationDate) <= now : false,
+          isProActive,
+        });
+      }
+      
+      log('Pro status determined:', {
+        isProActive,
+        proEntitlement: proEntitlement ? {
+          identifier: proEntitlement.identifier,
+          productIdentifier: proEntitlement.productIdentifier,
+          isActive: proEntitlement.isActive,
+        } : null,
+      });
+
+      const subscriptionData = {
+        user_id: user.id,
+        plan_type: isProActive ? 'pro' : 'free',
+        status: isProActive ? 'active' : 'cancelled',
+        revenue_cat_customer_id: customerInfo.originalAppUserId,
+        revenue_cat_subscription_id: proEntitlement?.productIdentifier || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      log('Attempting to upsert subscription data:', subscriptionData);
 
       // Update Supabase subscription
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('user_subscriptions')
-        .upsert({
-          user_id: user.id,
-          plan_type: isProActive ? 'pro' : 'free',
-          status: isProActive ? 'active' : 'cancelled',
-          revenue_cat_customer_id: customerInfo.originalAppUserId,
-          revenue_cat_subscription_id: customerInfo.entitlements.active['pro']?.productIdentifier || null,
-          updated_at: new Date().toISOString(),
-        }, {
+        .upsert(subscriptionData, {
           onConflict: 'user_id'
-        });
+        })
+        .select();
 
       if (error) {
         logError('Error syncing subscription to Supabase:', error);
+        logError('Error details:', JSON.stringify(error, null, 2));
+        Alert.alert(
+          'Sync Error',
+          `Failed to update subscription: ${error.message}. Please check the logs.`
+        );
       } else {
+        log('Subscription successfully synced with Supabase:', {
+          data,
+          planType: isProActive ? 'pro' : 'free',
+        });
         setPlanType(isProActive ? 'pro' : 'free');
         setSubscriptionStatus(isProActive ? 'active' : 'cancelled');
-        log('Subscription synced with Supabase:', isProActive ? 'pro' : 'free');
       }
     } catch (error) {
       logError('Error in syncWithSupabase:', error);
+      logError('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      Alert.alert(
+        'Sync Error',
+        'An unexpected error occurred while syncing subscription. Please try again.'
+      );
     }
   };
 
@@ -398,10 +475,40 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // Purchase the package
       const { customerInfo } = await Purchases.purchasePackage(packageToPurchase);
 
-      // Sync with Supabase
+      // Sync with Supabase immediately
       await syncWithSupabase(customerInfo);
 
-      Alert.alert('Success', 'Pro plan purchased successfully!');
+      // Wait a moment for RevenueCat to fully process the purchase
+      // Sometimes the entitlement might not be immediately available
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Refresh subscription data to ensure UI is updated
+      // This is important because RevenueCat may need a moment to process the purchase
+      await refreshSubscription();
+
+      // Double-check the subscription status after refresh
+      const finalCustomerInfo = await Purchases.getCustomerInfo();
+      const finalProEntitlement = finalCustomerInfo.entitlements.active['pro'] || 
+                                 finalCustomerInfo.entitlements.active['Pro'] ||
+                                 finalCustomerInfo.entitlements.active['PRO'] ||
+                                 Object.values(finalCustomerInfo.entitlements.active).find(
+                                   (entitlement: any) => 
+                                     entitlement.identifier?.toLowerCase().includes('pro') ||
+                                     entitlement.productIdentifier?.toLowerCase().includes('pro')
+                                 );
+      
+      if (finalProEntitlement) {
+        // Final sync to ensure Supabase is up to date
+        await syncWithSupabase(finalCustomerInfo);
+        Alert.alert('Success', 'Pro plan purchased successfully!');
+      } else {
+        // If still no entitlement, log warning but show success (might be delayed)
+        logError('Warning: Pro entitlement not found after purchase, but purchase was successful. This might be a timing issue.');
+        Alert.alert(
+          'Purchase Successful', 
+          'Your purchase was successful! If your subscription status doesn\'t update immediately, please wait a moment and refresh, or use "Restore Purchases".'
+        );
+      }
     } catch (error: any) {
       if (error.userCancelled) {
         // User cancelled, no action needed
@@ -419,10 +526,22 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     try {
       const customerInfo = await Purchases.restorePurchases();
 
-      const isProActive = customerInfo.entitlements.active['pro'] !== undefined;
+      // Check for pro entitlement - try multiple possible names (same logic as syncWithSupabase)
+      const proEntitlement = customerInfo.entitlements.active['pro'] || 
+                            customerInfo.entitlements.active['Pro'] ||
+                            customerInfo.entitlements.active['PRO'] ||
+                            Object.values(customerInfo.entitlements.active).find(
+                              (entitlement: any) => 
+                                entitlement.identifier?.toLowerCase().includes('pro') ||
+                                entitlement.productIdentifier?.toLowerCase().includes('pro')
+                            );
+      
+      const isProActive = proEntitlement !== undefined;
 
       if (isProActive) {
         await syncWithSupabase(customerInfo);
+        // Refresh subscription data to ensure UI is updated
+        await refreshSubscription();
         Alert.alert('Success', 'Purchases restored successfully!');
       } else {
         Alert.alert('No Purchases Found', 'No active subscriptions found on this account.');
@@ -528,6 +647,29 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setUploadCount(0);
       setLoading(false);
     }
+  }, [user]);
+
+  // Refresh subscription when app comes to foreground
+  // This ensures cancelled subscriptions are detected when user returns to app
+  useEffect(() => {
+    if (!user) return;
+
+    const subscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        // App has come to the foreground, refresh subscription status
+        log('App came to foreground, refreshing subscription status...');
+        try {
+          const customerInfo = await Purchases.getCustomerInfo();
+          await syncWithSupabase(customerInfo);
+        } catch (error) {
+          logError('Error refreshing subscription on app state change:', error);
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, [user]);
 
   return (

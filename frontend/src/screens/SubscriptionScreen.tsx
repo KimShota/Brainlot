@@ -8,6 +8,8 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
+  Linking,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -56,15 +58,51 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
   const source = route?.params?.source || 'settings';
 
   const handlePurchase = async () => {
-    await purchasePro();
-    // Navigate back after successful purchase
-    if (source === 'upload') {
-      navigation.goBack();
+    try {
+      await purchasePro();
+      // Wait a moment for state to update before navigating
+      // This ensures the UI reflects the new subscription status
+      await new Promise(resolve => setTimeout(resolve, 500));
+      // Navigate back after successful purchase
+      if (source === 'upload') {
+        navigation.goBack();
+      }
+    } catch (error) {
+      // Error handling is done in purchasePro, so we just need to catch here
+      console.error('Purchase error:', error);
     }
   };
 
   const handleRestore = async () => {
     await restorePurchases();
+  };
+
+  const openTermsOfUse = async () => {
+    const url = 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Error', 'Cannot open Terms of Use');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to open Terms of Use');
+    }
+  };
+
+  const openPrivacyPolicy = async () => {
+    const url = 'https://kimshota.github.io/Brainlot/privacy-policy.html';
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Error', 'Cannot open Privacy Policy');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to open Privacy Policy');
+    }
   };
 
   if (loading) {
@@ -227,6 +265,35 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
         >
           <Text style={[styles.restoreButtonText, { color: colors.secondary }]}>Restore Purchases</Text>
         </TouchableOpacity>
+
+        {/* Legal Links Section */}
+        <View style={styles.legalLinksContainer}>
+          <TouchableOpacity
+            onPress={openTermsOfUse}
+            activeOpacity={0.7}
+            style={[styles.legalLink, { 
+              backgroundColor: `${colors.primary}10`,
+              borderColor: `${colors.primary}20`,
+            }]}
+          >
+            <Ionicons name="document-text-outline" size={20} color={colors.primary} />
+            <Text style={[styles.legalLinkText, { color: colors.primary }]}>Terms of Use (EULA)</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            onPress={openPrivacyPolicy}
+            activeOpacity={0.7}
+            style={[styles.legalLink, { 
+              backgroundColor: `${colors.primary}10`,
+              borderColor: `${colors.primary}20`,
+            }]}
+          >
+            <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
+            <Text style={[styles.legalLinkText, { color: colors.primary }]}>Privacy Policy</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </View>
 
         {/* Unsubscribe Button - Only show for Pro users */}
         {isProUser && (
@@ -473,6 +540,27 @@ const styles = StyleSheet.create({
   infoText: {
     fontSize: 14,
     lineHeight: 22,
+  },
+  legalLinksContainer: {
+    marginTop: 20,
+    marginBottom: 20,
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  legalLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 12,
+  },
+  legalLinkText: {
+    fontSize: 15,
+    fontWeight: '600',
+    flex: 1,
   },
 });
 

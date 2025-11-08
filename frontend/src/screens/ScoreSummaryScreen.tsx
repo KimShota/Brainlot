@@ -18,13 +18,13 @@ import { useTheme } from '../contexts/ThemeContext';
 const { width, height } = Dimensions.get('window');
 
 interface ScoreSummaryScreenProps {
-  navigation: any;
-  route: {
-    params: {
-      totalQuestions: number;
-      correctAnswers: number;
-      userAnswers: Map<string, number>;
-      items: any[];
+  navigation?: any;
+  route?: {
+    params?: {
+      totalQuestions?: number;
+      correctAnswers?: number;
+      userAnswers?: Map<string, number>;
+      items?: any[];
     };
   };
 }
@@ -32,7 +32,12 @@ interface ScoreSummaryScreenProps {
 export default function ScoreSummaryScreen({ navigation, route }: ScoreSummaryScreenProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { totalQuestions, correctAnswers, userAnswers, items } = route.params;
+  const { 
+    totalQuestions = 0, 
+    correctAnswers = 0, 
+    userAnswers = new Map<string, number>(), 
+    items = [] 
+  } = route?.params || {};
   const [viewMode, setViewMode] = useState<'summary' | 'retest'>('summary');
   const [retestUserAnswers, setRetestUserAnswers] = useState<Map<string, number>>(new Map());
   const [retestAnsweredQuestions, setRetestAnsweredQuestions] = useState<Set<string>>(new Set());
@@ -41,7 +46,7 @@ export default function ScoreSummaryScreen({ navigation, route }: ScoreSummarySc
   const scrollViewRef = useRef<ScrollView>(null);
 
   const score = correctAnswers;
-  const percentage = Math.round((correctAnswers / totalQuestions) * 100);
+  const percentage = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
   
   const ITEM_HEIGHT = height;
 

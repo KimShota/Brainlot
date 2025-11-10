@@ -15,24 +15,15 @@ const rateLimitMap = new Map<string, { count: number, resetTime: number }>();
 const RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
 const RATE_LIMIT_MAX_REQUESTS = 10; // 10 requests per hour per user
 
-// User subscription limits
+// User subscription limits (daily only)
 const USER_LIMITS = {
   FREE: {
-    daily_limit: 10,     // 10 files per day
-    monthly_limit: 300   // 300 files per month
+    daily_limit: 5      // 5 files per day
   },
   PRO: {
-    daily_limit: 100,    // 100 files per day (effectively unlimited)
-    monthly_limit: 3000  // 3000 files per month
+    daily_limit: 50     // 50 files per day
   }
 };
-
-// User usage tracking (in-memory)
-const userUsageMap = new Map<string, {
-  daily: { count: number, resetTime: number },
-  monthly: { count: number, resetTime: number },
-  subscription: 'FREE' | 'PRO'
-}>();
 
 // Cache for storing MCQs temporarily (in-memory)
 const mcqCache = new Map<string, { mcqs: any[], timestamp: number }>();
@@ -100,80 +91,146 @@ async function getUserSubscription(userId: string, supabaseClient: any): Promise
 }
 
 /**
- * Check user-specific limits (daily, monthly, hourly)
+ * Get user usage stats from database (daily limit only)
  */
-function checkUserLimits(userId: string, subscription: 'FREE' | 'PRO'): {
+async function getUserUsageStatsFromDB(userId: string, supabaseClient: any): Promise<{
+  uploads_today: number;
+  daily_reset_at: string;
+}> {
+  try {
+    // Use RPC function to get stats (automatically checks and resets if needed)
+    const { data, error } = await supabaseClient.rpc('get_user_usage_stats', {
+      user_id_param: userId,
+    });
+
+    if (error) {
+      console.error('Error fetching usage stats from RPC:', error);
+      // Fallback to direct query
+      const { data: fallbackData, error: fallbackError } = await supabaseClient
+        .from('user_usage_stats')
+        .select('uploads_today, daily_reset_at')
+        .eq('user_id', userId)
+        .single();
+
+      if (fallbackError) {
+        console.error('Error fetching usage stats (fallback):', fallbackError);
+        // Return defaults if record doesn't exist
+        return {
+          uploads_today: 0,
+          daily_reset_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        };
+      }
+
+      return {
+        uploads_today: fallbackData.uploads_today || 0,
+        daily_reset_at: fallbackData.daily_reset_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      };
+    }
+
+    if (data && data.length > 0) {
+      return {
+        uploads_today: data[0].uploads_today || 0,
+        daily_reset_at: data[0].daily_reset_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      };
+    }
+
+    // Default if no data
+    return {
+      uploads_today: 0,
+      daily_reset_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    };
+  } catch (error) {
+    console.error('Error in getUserUsageStatsFromDB:', error);
+    return {
+      uploads_today: 0,
+      daily_reset_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    };
+  }
+}
+
+/**
+ * Check user-specific limits (daily only) using database
+ */
+async function checkUserLimits(
+  userId: string, 
+  subscription: 'FREE' | 'PRO',
+  supabaseClient: any
+): Promise<{
   allowed: boolean;
-  limitType: 'daily' | 'monthly' | null;
+  limitType: 'daily' | null;
   remaining: number;
   resetTime: number;
-} {
-  const now = Date.now();
+}> {
   const limits = USER_LIMITS[subscription];
   
-  // Get or create user usage record
-  let userUsage = userUsageMap.get(userId);
-  if (!userUsage) {
-    userUsage = {
-      daily: { count: 0, resetTime: now + (24 * 60 * 60 * 1000) },
-      monthly: { count: 0, resetTime: now + (30 * 24 * 60 * 60 * 1000) },
-      subscription: subscription
-    };
-    userUsageMap.set(userId, userUsage);
-  }
+  // Get usage stats from database
+  const usage = await getUserUsageStatsFromDB(userId, supabaseClient);
   
-  // Check daily limit
-  if (now > userUsage.daily.resetTime) {
-    userUsage.daily = { count: 0, resetTime: now + (24 * 60 * 60 * 1000) };
-  }
-  if (userUsage.daily.count >= limits.daily_limit) {
+  // Check daily limit only
+  if (usage.uploads_today >= limits.daily_limit) {
     return {
       allowed: false,
       limitType: 'daily',
       remaining: 0,
-      resetTime: userUsage.daily.resetTime
+      resetTime: new Date(usage.daily_reset_at).getTime(),
     };
   }
   
-  // Check monthly limit
-  if (now > userUsage.monthly.resetTime) {
-    userUsage.monthly = { count: 0, resetTime: now + (30 * 24 * 60 * 60 * 1000) };
-  }
-  if (userUsage.monthly.count >= limits.monthly_limit) {
-    return {
-      allowed: false,
-      limitType: 'monthly',
-      remaining: 0,
-      resetTime: userUsage.monthly.resetTime
-    };
-  }
-  
-  // All limits passed
+  // Daily limit passed
   return {
     allowed: true,
     limitType: null,
-    remaining: Math.min(
-      limits.daily_limit - userUsage.daily.count,
-      limits.monthly_limit - userUsage.monthly.count
-    ),
-    resetTime: Math.min(
-      userUsage.daily.resetTime,
-      userUsage.monthly.resetTime
-    )
+    remaining: limits.daily_limit - usage.uploads_today,
+    resetTime: new Date(usage.daily_reset_at).getTime(),
   };
 }
 
 /**
- * Increment user usage counters
+ * Increment user usage counters in database
  */
-function incrementUserUsage(userId: string): void {
-  const userUsage = userUsageMap.get(userId);
-  if (userUsage) {
-    userUsage.daily.count++;
-    userUsage.monthly.count++;
-    userUsageMap.set(userId, userUsage);
-    
-    console.log(`👤 User ${userId} usage: Daily(${userUsage.daily.count}), Monthly(${userUsage.monthly.count})`);
+async function incrementUserUsage(userId: string, supabaseClient: any): Promise<void> {
+  try {
+    // Use RPC function to increment (automatically handles daily reset)
+    const { error } = await supabaseClient.rpc('increment_upload_count', {
+      user_id_param: userId,
+    });
+
+    if (error) {
+      console.error('Error incrementing upload count via RPC:', error);
+      // Fallback to manual update (daily limit only)
+      const { data: current } = await supabaseClient
+        .from('user_usage_stats')
+        .select('uploads_today, daily_reset_at')
+        .eq('user_id', userId)
+        .single();
+
+      if (current) {
+        const now = new Date();
+        const resetAt = new Date(current.daily_reset_at);
+        
+        // Check if daily reset is needed
+        if (now >= resetAt) {
+          await supabaseClient
+            .from('user_usage_stats')
+            .update({
+              uploads_today: 1,
+              daily_reset_at: new Date(now.setUTCHours(24, 0, 0, 0)).toISOString(),
+            })
+            .eq('user_id', userId);
+        } else {
+          await supabaseClient
+            .from('user_usage_stats')
+            .update({
+              uploads_today: (current.uploads_today || 0) + 1,
+            })
+            .eq('user_id', userId);
+        }
+      }
+    } else {
+      console.log(`✅ User ${userId} upload count incremented via RPC`);
+    }
+  } catch (error) {
+    console.error('Error in incrementUserUsage:', error);
   }
 }
 
@@ -367,17 +424,13 @@ Deno.serve(async (req) => {
     const subscription = await getUserSubscription(user.id, supabaseClient);
     console.log(`👤 User ${user.id} subscription: ${subscription}`);
     
-    const userLimits = checkUserLimits(user.id, subscription);
+    const userLimits = await checkUserLimits(user.id, subscription, supabaseClient);
     if (!userLimits.allowed) {
       const resetTimeHours = Math.ceil((userLimits.resetTime - Date.now()) / (60 * 60 * 1000));
       const resetTimeDays = Math.ceil((userLimits.resetTime - Date.now()) / (24 * 60 * 60 * 1000));
       
-      let errorMessage = "";
-      if (userLimits.limitType === 'daily') {
-        errorMessage = `Daily limit reached. You can generate MCQs again in ${resetTimeDays} days.`;
-      } else if (userLimits.limitType === 'monthly') {
-        errorMessage = `Monthly limit reached. You can generate MCQs again in ${resetTimeDays} days.`;
-      }
+      // Daily limit only (monthly limit removed)
+      const errorMessage = `Daily limit reached. You can generate MCQs again in ${resetTimeDays} days.`;
       
       return new Response(
         JSON.stringify({ 
@@ -523,7 +576,7 @@ IMPORTANT: Generate questions that test users' understanding and knowledge of th
 
     // 9. Increment usage counters
     incrementGlobalUsage();
-    incrementUserUsage(user.id);
+    await incrementUserUsage(user.id, supabaseClient);
 
     // 10. Cache the MCQs for future use
     cacheMCQs(fileHash, mcqs);

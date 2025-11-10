@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -27,6 +28,7 @@ interface SubscriptionScreenProps {
 
 export default function SubscriptionScreen({ navigation, route }: SubscriptionScreenProps) {
   const { colors } = useTheme();
+  const [isPurchasing, setIsPurchasing] = React.useState(false);
   const {
     planType,
     isProUser,
@@ -37,7 +39,31 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
     purchasePro,
     restorePurchases,
     unsubscribeFromPro,
+    refreshSubscription,
   } = useSubscription();
+
+  // Refresh subscription data when screen comes into focus
+  // Use a ref to prevent multiple simultaneous refreshes
+  const isRefreshingRef = React.useRef(false);
+  
+  useFocusEffect(
+    React.useCallback(() => {
+      // Prevent multiple simultaneous refreshes
+      if (isRefreshingRef.current) {
+        return;
+      }
+      
+      isRefreshingRef.current = true;
+      // Always refresh in background without showing loading screen
+      // Content is displayed immediately with default/cached values
+      refreshSubscription(false).finally(() => {
+        // Reset after a short delay to allow the refresh to complete
+        setTimeout(() => {
+          isRefreshingRef.current = false;
+        }, 1000);
+      });
+    }, [refreshSubscription])
+  );
 
   // Get price from RevenueCat offerings
   const getProPrice = () => {
@@ -49,15 +75,23 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
                pkg.packageType === 'MONTHLY'
       );
       if (monthlyPackage?.product.priceString) {
-        return monthlyPackage.product.priceString;
+        const priceString = monthlyPackage.product.priceString;
+        // Replace "600 yen" or "¥600" with "$3.99 / month"
+        if (priceString.includes('600') && (priceString.includes('yen') || priceString.includes('¥'))) {
+          return '$3.99 / month';
+        }
+        return priceString;
       }
     }
-    return '$5/month'; // Fallback
+    return '$3.99 / month'; // Fallback
   };
 
   const source = route?.params?.source || 'settings';
 
   const handlePurchase = async () => {
+    if (isPurchasing) return; // Prevent multiple simultaneous purchases
+    
+    setIsPurchasing(true);
     try {
       await purchasePro();
       // Wait a moment for state to update before navigating
@@ -67,9 +101,17 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
       if (source === 'upload') {
         navigation.goBack();
       }
-    } catch (error) {
-      // Error handling is done in purchasePro, so we just need to catch here
+    } catch (error: any) {
+      // Error handling is done in purchasePro, but ensure we show something if it fails
       console.error('Purchase error:', error);
+      if (error && !error.userCancelled) {
+        Alert.alert(
+          'Purchase Error',
+          error.message || 'An error occurred during purchase. Please try again.'
+        );
+      }
+    } finally {
+      setIsPurchasing(false);
     }
   };
 
@@ -105,15 +147,8 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
     }
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // Removed loading screen - always show content with default values
+  // Data will be updated in the background via refreshSubscription
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -179,11 +214,11 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
           <View style={styles.featureList}>
             <View style={styles.featureItem}>
               <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-              <Text style={[styles.featureText, { color: colors.foreground }]}>Up to 10 uploads</Text>
+              <Text style={[styles.featureText, { color: colors.foreground }]}>Up to 5 uploads per day</Text>
             </View>
             <View style={styles.featureItem}>
               <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-              <Text style={[styles.featureText, { color: colors.foreground }]}>Generate 300 MCQs total</Text>
+              <Text style={[styles.featureText, { color: colors.foreground }]}>Generate 150 MCQs total</Text>
             </View>
             <View style={styles.featureItem}>
               <Ionicons name="close-circle" size={20} color={colors.mutedForeground} />
@@ -236,15 +271,25 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
                 style={styles.upgradeButton}
                 onPress={handlePurchase}
                 activeOpacity={0.9}
+                disabled={isPurchasing || loading}
               >
                 <LinearGradient
                   colors={[colors.gold!, colors.secondary]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
-                  style={styles.upgradeButtonGradient}
+                  style={[styles.upgradeButtonGradient, (isPurchasing || loading) && { opacity: 0.6 }]}
                 >
-                  <Text style={styles.upgradeButtonText}>Upgrade Now</Text>
-                  <Ionicons name="arrow-forward" size={20} color="white" />
+                  {isPurchasing || loading ? (
+                    <>
+                      <ActivityIndicator size="small" color="white" />
+                      <Text style={styles.upgradeButtonText}>Processing...</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.upgradeButtonText}>Upgrade Now</Text>
+                      <Ionicons name="arrow-forward" size={20} color="white" />
+                    </>
+                  )}
                 </LinearGradient>
               </TouchableOpacity>
             )}
@@ -315,7 +360,7 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
           <Text style={[styles.infoText, { color: colors.mutedForeground }]}>
             • Pro plan is {getProPrice()} and can be cancelled anytime{'\n'}
             • Purchases auto-renew{'\n'}
-            • Free plan allows up to 10 uploads{'\n'}
+            • Free plan allows up to 5 uploads{'\n'}
             • You can unsubscribe from Pro plan anytime
           </Text>
         </View>
@@ -327,11 +372,6 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',

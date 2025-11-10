@@ -66,7 +66,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Get initial session
     const getInitialSession = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+        // Add timeout to prevent infinite loading
+        const getSessionPromise = supabase.auth.getSession();
+        const getSessionTimeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Session timeout. Please check your internet connection.')), 15000); // 15 seconds timeout
+        });
+        
+        const { data: { session }, error } = await Promise.race([getSessionPromise, getSessionTimeoutPromise]);
         
         if (!mounted) return;
         
@@ -81,10 +87,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (!session) {
             warn("No session active - redirect to login"); 
           } else {
-            log("User authenticated successfully"); 
+            log("User authenticated successfully");
+            // Check and reset daily uploads on login (non-blocking)
+            // This RPC is called in the background and doesn't block UI updates
+            // Also checked in UploadScreen when user navigates to it for redundancy
+            void (async () => {
+              try {
+                await supabase.rpc('check_and_reset_daily_uploads_on_login', {
+                  user_id_param: session.user.id,
+                });
+                log("Daily upload reset checked on login");
+              } catch (resetError: any) {
+                // Silently handle errors - this is non-critical and will be handled by UploadScreen
+                logError('Error checking daily reset on login (non-blocking):', resetError);
+              }
+            })();
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         logError('Error in getInitialSession:', error);
         if (mounted) {
           setSession(null);
@@ -112,7 +132,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
 
       if (session) {
-        log("Session updated successfully"); 
+        log("Session updated successfully");
+        // Check and reset daily uploads on login/sign in (non-blocking)
+        // This RPC is called in the background and doesn't block UI updates
+        // Also checked in UploadScreen when user navigates to it for redundancy
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          void (async () => {
+            try {
+              await supabase.rpc('check_and_reset_daily_uploads_on_login', {
+                user_id_param: session.user.id,
+              });
+              log("Daily upload reset checked on auth state change");
+            } catch (resetError: any) {
+              // Silently handle errors - this is non-critical and will be handled by UploadScreen
+              logError('Error checking daily reset on auth change (non-blocking):', resetError);
+            }
+          })();
+        }
       } else {
         log("User signed out"); 
       }

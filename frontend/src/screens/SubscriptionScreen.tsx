@@ -361,7 +361,8 @@ export default function SubscriptionScreen({ navigation, route }: SubscriptionSc
             • Pro plan is {getProPrice()} and can be cancelled anytime{'\n'}
             • Purchases auto-renew{'\n'}
             • Free plan allows up to 5 uploads{'\n'}
-            • You can unsubscribe from Pro plan anytime
+            • You can unsubscribe from Pro plan anytime{'\n'}
+            • To ensure stable performance for all users, upload activity may be subject to fair usage limits that prevent excessive automated or abnormal usage
           </Text>
         </View>
       </ScrollView>

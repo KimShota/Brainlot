@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { View, Text, Button, Alert, ActivityIndicator, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Modal, Animated } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
@@ -8,7 +8,9 @@ import { log, warn, error as logError } from "../lib/logger";
 import { getUserFriendlyError } from "../lib/errorUtils";
 import { LinearGradient } from "expo-linear-gradient"; 
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSubscription } from "../contexts/SubscriptionContext"; 
+import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import * as WebBrowser from "expo-web-browser"; 
 
@@ -18,9 +20,43 @@ const function_url = "/functions/v1/generate-mcqs";
 //main function 
 export default function UploadScreen({ navigation }: any ){
     const { colors, isDarkMode, toggleTheme } = useTheme();
+    const { user } = useAuth();
     const [loading, setLoading] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
-    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
+    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount, refreshSubscription, addRecentUpload, fetchSubscriptionData, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
+
+    // Check and reset daily uploads when screen comes into focus
+    // This ensures daily_reset_at is checked every time user navigates to upload screen
+    // regardless of whether they logged in or not
+    useFocusEffect(
+        useCallback(() => {
+            if (!user) return; // Only check if user is logged in
+            
+            // Check and reset daily uploads if daily_reset_at has passed
+            // This is non-blocking and runs in the background
+            void (async () => {
+                try {
+                    await supabase.rpc('check_and_reset_daily_uploads_on_login', {
+                        user_id_param: user.id,
+                    });
+                    log("Daily upload reset checked on upload screen focus");
+                    
+                    // Immediately fetch subscription data to update UI with latest upload count
+                    // This ensures "Today: X/Y files" and "uploads remaining" update immediately
+                    await fetchSubscriptionData();
+                } catch (error: any) {
+                    // Silently handle errors - this is non-critical
+                    logError('Error checking daily reset on upload screen focus:', error);
+                    // Even if reset fails, try to fetch data to update UI
+                    try {
+                        await fetchSubscriptionData();
+                    } catch (fetchError) {
+                        logError('Error fetching subscription data after reset error:', fetchError);
+                    }
+                }
+            })();
+        }, [user, fetchSubscriptionData])
+    );
 
     //Function to check rate limits for pro users 
     const checkRateLimits = () => {
@@ -48,8 +84,8 @@ export default function UploadScreen({ navigation }: any ){
             
             if (uploadsInLastHour >= 20) { //if the user uploaded more than 20 files in the last hour
                 message += `You've uploaded ${uploadsInLastHour} files in the last hour (limit: 20). ${nextUploadTime}`;
-            } else if (uploadsInLastDay >= 100) { //if the user uploaded more than 100 files in the day 
-                message += `You've uploaded ${uploadsInLastDay} files in the last day (limit: 100). ${nextUploadTime}`;
+            } else if (uploadsInLastDay >= 50) { //if the user uploaded more than 50 files in the day 
+                message += `You've uploaded ${uploadsInLastDay} files in the last day. ${nextUploadTime}`;
             } else { //if the user uploaded two files in the last 30 seconds
                 message += `Please wait 30 seconds between uploads. ${nextUploadTime}`;
             }
@@ -77,21 +113,33 @@ export default function UploadScreen({ navigation }: any ){
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            // Clear Supabase session
-                            const { error } = await supabase.auth.signOut();
+                            // Clear Supabase session with timeout
+                            const signOutPromise = supabase.auth.signOut();
+                            const signOutTimeoutPromise = new Promise<never>((_, reject) => {
+                                setTimeout(() => reject(new Error('Logout timeout. Please try again.')), 10000); // 10 seconds timeout
+                            });
+                            
+                            const { error } = await Promise.race([signOutPromise, signOutTimeoutPromise]);
+                            
                             if (error) {
                                 Alert.alert("Error", error.message);
                                 return;
                             }
                             
                             // Clear WebBrowser session to ensure Google auth session is cleared
-                            await WebBrowser.dismissBrowser();
+                            try {
+                                await WebBrowser.dismissBrowser();
+                            } catch (dismissError) {
+                                // Non-critical error, continue
+                                logError("Error dismissing browser:", dismissError);
+                            }
                             
                             log("Successfully logged out - sessions cleared");
                             // Navigation will be handled by AuthContext automatically
-                        } catch (error) {
+                        } catch (error: any) {
                             logError("Error during logout:", error);
-                            Alert.alert("Error", "Failed to logout properly");
+                            const errorMessage = error.message || "Failed to logout properly";
+                            Alert.alert("Error", errorMessage);
                         }
                     }
                 }
@@ -104,24 +152,20 @@ export default function UploadScreen({ navigation }: any ){
         // Haptic feedback on button press
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
-        // Check upload limit for free users
+        // Check upload limit for all users
         if (!canUpload) {
+            const limitText = isProUser ? 'unlimited' : `${uploadLimit} files per day`;
             Alert.alert(
                 "Upload Limit Reached",
-                `Free plan allows up to ${uploadLimit} uploads. Upgrade to Pro plan for unlimited access!`,
+                `You've reached your daily upload limit (${limitText}). ${isProUser ? 'Please try again tomorrow.' : 'Upgrade to Pro plan for unlimited uploads!'}`,
                 [
                     { text: "Cancel", style: "cancel" },
-                    { 
+                    ...(isProUser ? [] : [{
                         text: "View Plans", 
                         onPress: () => navigation.navigate("Subscription", { source: 'upload' })
-                    }
+                    }])
                 ]
             );
-            return;
-        }
-
-        // Check rate limits for Pro users
-        if (!checkRateLimits()) {
             return;
         }
 
@@ -139,24 +183,20 @@ export default function UploadScreen({ navigation }: any ){
         // Haptic feedback on button press
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
-        // Check upload limit for free users
+        // Check upload limit for all users
         if (!canUpload) {
+            const limitText = isProUser ? 'unlimited' : `${uploadLimit} files per day`;
             Alert.alert(
                 "Upload Limit Reached",
-                `Free plan allows up to ${uploadLimit} uploads. Upgrade to Pro plan for unlimited access!`,
+                `You've reached your daily upload limit (${limitText}). ${isProUser ? 'Please try again tomorrow.' : 'Upgrade to Pro plan for unlimited uploads!'}`,
                 [
                     { text: "Cancel", style: "cancel" },
-                    { 
+                    ...(isProUser ? [] : [{
                         text: "View Plans", 
                         onPress: () => navigation.navigate("Subscription", { source: 'upload' })
-                    }
+                    }])
                 ]
             );
-            return;
-        }
-
-        // Check rate limits for Pro users
-        if (!checkRateLimits()) {
             return;
         }
 
@@ -201,6 +241,24 @@ export default function UploadScreen({ navigation }: any ){
     async function handleUpload(uri: string, mime: string){
         try {
             log("🟢 Step 1: Starting upload process");
+            
+            // 0. Check upload limit BEFORE processing file (immediate check)
+            if (!canUpload) {
+                const limitText = `${uploadLimit} files per day`;
+                Alert.alert(
+                    "Upload Limit Reached",
+                    `You've reached your daily upload limit (${limitText}). ${isProUser ? 'Please try again tomorrow.' : 'Upgrade to Pro plan for unlimited uploads!'}`,
+                    [
+                        { text: "Cancel", style: "cancel" },
+                        ...(isProUser ? [] : [{
+                            text: "View Plans", 
+                            onPress: () => navigation.navigate("Subscription", { source: 'upload' })
+                        }])
+                    ]
+                );
+                return;
+            }
+            
             setLoading(true);
                 
             // 1. Validate MIME type
@@ -218,9 +276,19 @@ export default function UploadScreen({ navigation }: any ){
                 throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
             }
 
-            // 2. Get current user
+            // 2. Get current user with timeout
             log("🟢 Step 3: Authenticating user");
-            const { data: { user } } = await supabase.auth.getUser();
+            const getUserPromise = supabase.auth.getUser();
+            const getUserTimeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Authentication timeout. Please check your internet connection and try again.')), 15000); // 15 seconds timeout
+            });
+            
+            const { data: { user }, error: getUserError } = await Promise.race([getUserPromise, getUserTimeoutPromise]);
+            
+            if (getUserError) {
+                throw new Error(`Authentication error: ${getUserError.message}`);
+            }
+            
             if (!user) {
                 throw new Error("User not authenticated. Please log in.");
             }
@@ -257,7 +325,13 @@ export default function UploadScreen({ navigation }: any ){
             // 6. Call Edge Function with file data directly (no storage upload)
             log("🟢 Step 9: Calling Edge Function");
             const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-            const fnRes = await fetch(`${baseUrl}${function_url}`, {
+            
+            // Add timeout to prevent infinite loading
+            const timeoutPromise = new Promise<Response>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout. Please check your internet connection and try again.')), 120000); // 2 minutes timeout
+            });
+            
+            const fetchPromise = fetch(`${baseUrl}${function_url}`, {
                 method: "POST", 
                 headers: {
                     "Content-Type": "application/json", 
@@ -268,11 +342,52 @@ export default function UploadScreen({ navigation }: any ){
                     file_data: base64Data,  // Send file data directly
                     mime_type: mime
                 }),
-            }); 
+            });
+            
+            const fnRes = await Promise.race([fetchPromise, timeoutPromise]); 
 
             if (!fnRes.ok){
-                const errorText = await fnRes.text();
-                throw new Error(errorText); 
+                // Try to parse JSON error response first
+                let errorMessage = "Something went wrong. Please try again.";
+                try {
+                    const errorData = await fnRes.json();
+                    if (errorData.error) {
+                        errorMessage = errorData.error;
+                    } else if (errorData.message) {
+                        errorMessage = errorData.message;
+                    }
+                } catch (parseError) {
+                    // If JSON parsing fails, try text
+                    try {
+                        const errorText = await fnRes.text();
+                        if (errorText) {
+                            errorMessage = errorText;
+                        }
+                    } catch (textError) {
+                        // Use default message
+                    }
+                }
+                
+                // Handle rate limit errors (429) immediately
+                if (fnRes.status === 429) {
+                    setLoading(false);
+                    Alert.alert(
+                        "Upload Limit Reached",
+                        errorMessage,
+                        [
+                            { text: "OK", style: "default" },
+                            ...(isProUser ? [] : [{
+                                text: "View Plans", 
+                                onPress: () => navigation.navigate("Subscription", { source: 'upload' })
+                            }])
+                        ]
+                    );
+                    // Refresh subscription data to update UI
+                    await fetchSubscriptionData();
+                    return;
+                }
+                
+                throw new Error(errorMessage);
             }
 
             // 7. Parse response and get MCQs
@@ -290,8 +405,12 @@ export default function UploadScreen({ navigation }: any ){
                 log(`🟢 Rate limit: ${result.rate_limit.remaining} remaining, resets at ${new Date(result.rate_limit.reset_time).toLocaleString()}`);
             }
 
-            // 9. Increment upload count
-            await incrementUploadCount();
+            // 9. Refresh subscription data (backend already incremented the count)
+            // Note: Backend increments the count, so we just refresh the frontend state
+            // Use fetchSubscriptionData directly to avoid loading state conflicts
+            await fetchSubscriptionData();
+            // Add to recent uploads for Pro user rate limiting
+            addRecentUpload();
 
             // 10. Navigate to Feed with MCQs
             log("🟢 Step 12: Navigating to Feed");
@@ -308,11 +427,34 @@ export default function UploadScreen({ navigation }: any ){
         } catch (e: any) {
             logError('Upload error:', e);
             
+            // Ensure loading is stopped immediately
+            setLoading(false);
+            
             // Use user-friendly error message
-            const errorMessage = getUserFriendlyError(e);
-            Alert.alert("Upload Error", errorMessage); 
+            let errorMessage = "Something went wrong. Please try again.";
+            
+            // Handle specific error types
+            if (e.message) {
+                if (e.message.includes('timeout') || e.message.includes('Request timeout')) {
+                    errorMessage = "Request timed out. Please check your internet connection and try again.";
+                } else if (e.message.includes('Network') || e.message.includes('Failed to fetch')) {
+                    errorMessage = "Network error. Please check your internet connection and try again.";
+                } else if (e.message.includes('JSON')) {
+                    errorMessage = "Invalid response from server. Please try again.";
+                } else {
+                    errorMessage = getUserFriendlyError(e);
+                }
+            } else {
+                errorMessage = getUserFriendlyError(e);
+            }
+            
+            // Show error alert immediately
+            Alert.alert("Upload Error", errorMessage, [
+                { text: "OK", style: "default" }
+            ]);
         } finally {
-            setLoading(false); //set loading to false no matter what
+            // Ensure loading is always stopped
+            setLoading(false);
         }
     }
 
@@ -357,18 +499,19 @@ export default function UploadScreen({ navigation }: any ){
                     </LinearGradient>
                     <Text style={[styles.heroTitle, { color: colors.foreground }]}>Upload your materials!</Text>
                     
-                    {/* Upload count badge for free users */}
+                    {/* Upload count badge for free users only */}
                     {!isProUser && (
                         <View style={[styles.uploadCountBadge, { 
                             backgroundColor: `${colors.secondary}20`,
                             borderColor: `${colors.secondary}40`,
                         }]}>
                             <Text style={[styles.uploadCountText, { color: colors.secondary }]}>
-                                Remaining: {Math.max(0, uploadLimit - uploadCount)}/{uploadLimit} uploads
+                                Today: {uploadCount}/{uploadLimit} files
                             </Text>
                         </View>
                     )}
                     
+                    {/* Pro badge - only for Pro users */}
                     {isProUser && (
                         <View style={[styles.proBadge, { 
                             backgroundColor: `${colors.secondary}20`,
@@ -482,8 +625,11 @@ export default function UploadScreen({ navigation }: any ){
                 borderTopColor: colors.border,
             }]}>
                 <TouchableOpacity
-                    style={[styles.cartButton, loading && styles.cartButtonDisabled]}
-                    onPress={() => navigation.navigate("Subscription", { source: 'upload' })}
+                    style={styles.cartButton}
+                    onPress={() => {
+                        // Navigate immediately without waiting for any processing
+                        navigation.navigate("Subscription", { source: 'upload' });
+                    }}
                     activeOpacity={0.9}
                     disabled={loading}
                 >
@@ -491,11 +637,11 @@ export default function UploadScreen({ navigation }: any ){
                         colors={[colors.secondary, colors.gold!]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
-                        style={styles.cartButtonGradient}
+                        style={[styles.cartButtonGradient, loading && { opacity: 0.5 }]}
                     >
-                        <Ionicons name={loading ? "hourglass" : "cart"} size={24} color="white" />
+                        <Ionicons name="cart" size={24} color="white" />
                         <Text style={styles.cartButtonText}>
-                            {loading ? 'Processing...' : (isProUser ? 'Manage Plan' : 'Upgrade to Pro')}
+                            {isProUser ? 'Manage Plan' : 'Upgrade to Pro'}
                         </Text>
                     </LinearGradient>
                 </TouchableOpacity>

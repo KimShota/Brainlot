@@ -1,6 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, Button, Alert, ActivityIndicator, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Modal, Animated } from "react-native";
-import * as DocumentPicker from "expo-document-picker";
+import { View, Text, Button, Alert, ActivityIndicator, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Modal, Animated, TextInput, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from 'expo-haptics';
 import { supabase } from "../lib/supabase";
@@ -13,7 +12,7 @@ import { useSubscription } from "../contexts/SubscriptionContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import * as WebBrowser from "expo-web-browser"; 
-import TextRecognition from 'react-native-text-recognition'; 
+import TextRecognition from 'react-native-text-recognition';
 
 //URL to supabase edge function
 const function_url = "/functions/v1/generate-mcqs"; 
@@ -24,6 +23,9 @@ export default function UploadScreen({ navigation }: any ){
     const { user } = useAuth();
     const [loading, setLoading] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [showTextInputModal, setShowTextInputModal] = useState(false);
+    const [textInput, setTextInput] = useState('');
+    const MAX_TEXT_LENGTH = 4000;
     const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount, refreshSubscription, addRecentUpload, fetchSubscriptionData, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
 
     // Check and reset daily uploads when screen comes into focus
@@ -148,8 +150,8 @@ export default function UploadScreen({ navigation }: any ){
         );
     }; 
 
-    //fucntion to load pdfs 
-    async function loadPdf(){
+    //function to open text input modal
+    function openTextInput(){
         // Haptic feedback on button press
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
@@ -170,13 +172,185 @@ export default function UploadScreen({ navigation }: any ){
             return;
         }
 
-        const result = await DocumentPicker.getDocumentAsync({
-            type: ["application/pdf"], 
-            multiple: false, //change to true if you want multiple pdfs 
-            copyToCacheDirectory: true, //stores files into app's cache folder 
-        }); 
-        if(result.canceled || !result.assets?.[0]) return; 
-        await handleUpload(result.assets[0].uri, "application/pdf"); 
+        setTextInput('');
+        setShowTextInputModal(true);
+    }
+
+    // Function to handle text input submission
+    async function handleTextInput() {
+        if (!textInput || textInput.trim().length === 0) {
+            Alert.alert("Input Required", "Please enter some text to generate MCQs.");
+            return;
+        }
+
+        if (textInput.trim().length < 50) {
+            Alert.alert("Text Too Short", "Please enter at least 50 characters to generate meaningful MCQs.");
+            return;
+        }
+
+        // Close modal
+        setShowTextInputModal(false);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+        try {
+            log("🟢 Step 1: Starting text processing");
+            setLoading(true);
+
+            // Check upload limit
+            if (!canUpload) {
+                const limitText = `${uploadLimit} files per day`;
+                Alert.alert(
+                    "Upload Limit Reached",
+                    `You've reached your daily upload limit (${limitText}). ${isProUser ? 'Please try again tomorrow.' : 'Upgrade to Pro plan for unlimited uploads!'}`,
+                    [
+                        { text: "Cancel", style: "cancel" },
+                        ...(isProUser ? [] : [{
+                            text: "View Plans", 
+                            onPress: () => navigation.navigate("Subscription", { source: 'upload' })
+                        }])
+                    ]
+                );
+                return;
+            }
+
+            log(`🟢 Step 2: Processing ${textInput.length} characters of text`);
+
+            // Get current user
+            log("🟢 Step 3: Authenticating user");
+            const getUserPromise = supabase.auth.getUser();
+            const getUserTimeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Authentication timeout. Please check your internet connection and try again.')), 15000);
+            });
+            
+            const { data: { user }, error: getUserError } = await Promise.race([getUserPromise, getUserTimeoutPromise]);
+            
+            if (getUserError) {
+                throw new Error(`Authentication error: ${getUserError.message}`);
+            }
+            
+            if (!user) {
+                throw new Error("User not authenticated. Please log in.");
+            }
+
+            // Get user session token
+            log("🟢 Step 4: Getting session token");
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+                throw new Error("No active session. Please log in again.");
+            }
+
+            // Call Edge Function with text content
+            log("🟢 Step 5: Calling Edge Function with text content");
+            const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+            
+            const timeoutPromise = new Promise<Response>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout. Please check your internet connection and try again.')), 120000);
+            });
+            
+            const fetchPromise = fetch(`${baseUrl}${function_url}`, {
+                method: "POST", 
+                headers: {
+                    "Content-Type": "application/json", 
+                    apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+                    Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ 
+                    text_content: textInput.trim(),
+                    content_type: "text"
+                }),
+            });
+            
+            const fnRes = await Promise.race([fetchPromise, timeoutPromise]); 
+
+            if (!fnRes.ok){
+                let errorMessage = "Something went wrong. Please try again.";
+                try {
+                    const errorData = await fnRes.json();
+                    if (errorData.error) {
+                        errorMessage = errorData.error;
+                    } else if (errorData.message) {
+                        errorMessage = errorData.message;
+                    }
+                } catch (parseError) {
+                    try {
+                        const errorText = await fnRes.text();
+                        if (errorText) {
+                            errorMessage = errorText;
+                        }
+                    } catch (textError) {
+                        // Use default message
+                    }
+                }
+                
+                if (fnRes.status === 429) {
+                    setLoading(false);
+                    Alert.alert(
+                        "Upload Limit Reached",
+                        errorMessage,
+                        [
+                            { text: "OK", style: "default" },
+                            ...(isProUser ? [] : [{
+                                text: "View Plans", 
+                                onPress: () => navigation.navigate("Subscription", { source: 'upload' })
+                            }])
+                        ]
+                    );
+                    await fetchSubscriptionData();
+                    return;
+                }
+                
+                throw new Error(errorMessage);
+            }
+
+            // Parse response and get MCQs
+            log("🟢 Step 6: Parsing MCQs");
+            const result = await fnRes.json();
+            
+            if (!result.ok || !result.mcqs) {
+                throw new Error("Failed to generate MCQs");
+            }
+
+            log(`🟢 Step 7: Generated ${result.mcqs.length} MCQs successfully`);
+
+            // Refresh subscription data
+            await fetchSubscriptionData();
+            addRecentUpload();
+
+            // Navigate to Feed
+            log("🟢 Step 8: Navigating to Feed");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            
+            navigation.navigate('Feed', { 
+                mcqs: result.mcqs,
+                generated_at: result.generated_at,
+                count: result.count,
+                cached: result.cached || false,
+                rate_limit: result.rate_limit
+            });
+        } catch (e: any) {
+            logError('Text processing error:', e);
+            setLoading(false);
+            
+            let errorMessage = "Something went wrong. Please try again.";
+            
+            if (e.message) {
+                if (e.message.includes('timeout') || e.message.includes('Request timeout')) {
+                    errorMessage = "Request timed out. Please check your internet connection and try again.";
+                } else if (e.message.includes('Network') || e.message.includes('Failed to fetch')) {
+                    errorMessage = "Network error. Please check your internet connection and try again.";
+                } else {
+                    errorMessage = getUserFriendlyError(e);
+                }
+            } else {
+                errorMessage = getUserFriendlyError(e);
+            }
+            
+            Alert.alert("Processing Error", errorMessage, [
+                { text: "OK", style: "default" }
+            ]);
+        } finally {
+            setLoading(false);
+        }
     }
 
     //function to load images 
@@ -424,7 +598,6 @@ export default function UploadScreen({ navigation }: any ){
                 
             // 1. Validate MIME type
             const ALLOWED_MIME_TYPES = [
-                'application/pdf',
                 'image/jpeg',
                 'image/jpg',
                 'image/png',
@@ -434,7 +607,7 @@ export default function UploadScreen({ navigation }: any ){
             
             log("🟢 Step 2: Validating file type");
             if (!ALLOWED_MIME_TYPES.includes(mime)) {
-                throw new Error("Invalid file type. Please upload a PDF or image file (JPEG, PNG, GIF, WebP).");
+                throw new Error("Invalid file type. Please upload an image file (JPEG, PNG, GIF, WebP).");
             }
 
             // 2. Get current user with timeout
@@ -687,11 +860,11 @@ export default function UploadScreen({ navigation }: any ){
                 {/* Upload Cards */}
                 <View style={styles.cardsContainer}>
                     <TouchableOpacity
-                        style={[styles.card, styles.pdfCard, {
+                        style={[styles.card, styles.textCard, {
                             backgroundColor: colors.card,
                             borderColor: `${colors.primary}33`,
                         }]}
-                        onPress={loadPdf}
+                        onPress={openTextInput}
                         activeOpacity={0.95}
                         disabled={loading}
                     >
@@ -699,11 +872,11 @@ export default function UploadScreen({ navigation }: any ){
                             colors={[colors.primary, colors.primary + 'CC']}
                             style={styles.cardIcon}
                         >
-                            <Ionicons name="document-text" size={36} color="white" />
+                            <Ionicons name="text" size={36} color="white" />
                         </LinearGradient>
                         <View style={styles.cardContent}>
-                            <Text style={[styles.cardTitle, { color: colors.foreground }]}>PDF Document</Text>
-                            <Text style={[styles.cardSubtitle, { color: colors.mutedForeground }]}>Scan text and extract data ✨</Text>
+                            <Text style={[styles.cardTitle, { color: colors.foreground }]}>Text Input</Text>
+                            <Text style={[styles.cardSubtitle, { color: colors.mutedForeground }]}>Enter your study material ✍️</Text>
                         </View>
                     </TouchableOpacity>
 
@@ -739,6 +912,67 @@ export default function UploadScreen({ navigation }: any ){
                     </View>
                 </View>
             )}
+
+            {/* Text Input Modal */}
+            <Modal
+                visible={showTextInputModal}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={() => setShowTextInputModal(false)}
+            >
+                <KeyboardAvoidingView 
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.modalOverlay}
+                >
+                    <View style={[styles.textInputModal, { backgroundColor: colors.card }]}>
+                        <View style={styles.textInputHeader}>
+                            <Text style={[styles.textInputTitle, { color: colors.foreground }]}>Enter Your Study Material</Text>
+                            <TouchableOpacity onPress={() => setShowTextInputModal(false)}>
+                                <Ionicons name="close" size={28} color={colors.mutedForeground} />
+                            </TouchableOpacity>
+                        </View>
+                        
+                        <ScrollView style={styles.textInputScrollView}>
+                            <TextInput
+                                style={[styles.textInputField, { 
+                                    color: colors.foreground,
+                                    borderColor: colors.border,
+                                    backgroundColor: colors.background
+                                }]}
+                                multiline
+                                placeholder="Paste or type your study material here (max 4,000 characters)..."
+                                placeholderTextColor={colors.mutedForeground}
+                                value={textInput}
+                                onChangeText={(text) => setTextInput(text.slice(0, MAX_TEXT_LENGTH))}
+                                maxLength={MAX_TEXT_LENGTH}
+                                autoFocus
+                            />
+                        </ScrollView>
+                        
+                        <View style={styles.textInputFooter}>
+                            <Text style={[styles.charCount, { color: colors.mutedForeground }]}>
+                                {textInput.length}/{MAX_TEXT_LENGTH} characters
+                            </Text>
+                            
+                            <TouchableOpacity
+                                style={styles.submitButton}
+                                onPress={handleTextInput}
+                                disabled={textInput.trim().length < 50}
+                            >
+                                <LinearGradient
+                                    colors={textInput.trim().length >= 50 ? [colors.primary, colors.accent] : [colors.mutedForeground, colors.mutedForeground]}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 0 }}
+                                    style={styles.submitButtonGradient}
+                                >
+                                    <Ionicons name="checkmark" size={24} color="white" />
+                                    <Text style={styles.submitButtonText}>Generate MCQs</Text>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
 
             {/* Success Modal */}
             <Modal
@@ -883,7 +1117,7 @@ const styles = StyleSheet.create({
         shadowRadius: 12,
         elevation: 4,
     },
-    pdfCard: {
+    textCard: {
         shadowOpacity: 0.1,
     },
     imageCard: {
@@ -1068,6 +1302,68 @@ const styles = StyleSheet.create({
         gap: 12,
     },
     cartButtonText: {
+        color: 'white',
+        fontSize: 18,
+        fontWeight: 'bold',
+    },
+    textInputModal: {
+        flex: 1,
+        marginTop: 100,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+    textInputHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.1)',
+    },
+    textInputTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
+    textInputScrollView: {
+        flex: 1,
+        padding: 20,
+    },
+    textInputField: {
+        minHeight: 300,
+        fontSize: 16,
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        textAlignVertical: 'top',
+    },
+    textInputFooter: {
+        padding: 20,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(0,0,0,0.1)',
+        gap: 16,
+    },
+    charCount: {
+        fontSize: 14,
+        textAlign: 'right',
+    },
+    submitButton: {
+        borderRadius: 16,
+        overflow: 'hidden',
+    },
+    submitButtonGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        gap: 8,
+    },
+    submitButtonText: {
         color: 'white',
         fontSize: 18,
         fontWeight: 'bold',

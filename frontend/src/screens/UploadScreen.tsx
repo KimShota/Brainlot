@@ -13,6 +13,7 @@ import { useSubscription } from "../contexts/SubscriptionContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import * as WebBrowser from "expo-web-browser"; 
+import TextRecognition from 'react-native-text-recognition'; 
 
 //URL to supabase edge function
 const function_url = "/functions/v1/generate-mcqs"; 
@@ -213,28 +214,188 @@ export default function UploadScreen({ navigation }: any ){
         }); 
         if (result.canceled || !result.assets?.[0]) return; 
         
-        // Get proper MIME type from file extension
         const uri = result.assets[0].uri;
-        const fileExt = uri.split(".").pop()?.toLowerCase();
-        let mimeType = "image/jpeg"; // default
         
-        switch (fileExt) {
-            case "jpg":
-            case "jpeg":
-                mimeType = "image/jpeg";
-                break;
-            case "png":
-                mimeType = "image/png";
-                break;
-            case "gif":
-                mimeType = "image/gif";
-                break;
-            case "webp":
-                mimeType = "image/webp";
-                break;
+        // Extract text from image using OCR
+        await handleImageOCR(uri); 
+    }
+
+    // Function to extract text from image using OCR
+    async function handleImageOCR(uri: string) {
+        try {
+            log("🟢 Step 1: Starting OCR process");
+            setLoading(true);
+
+            // 0. Check upload limit BEFORE processing (immediate check)
+            if (!canUpload) {
+                const limitText = `${uploadLimit} files per day`;
+                Alert.alert(
+                    "Upload Limit Reached",
+                    `You've reached your daily upload limit (${limitText}). ${isProUser ? 'Please try again tomorrow.' : 'Upgrade to Pro plan for unlimited uploads!'}`,
+                    [
+                        { text: "Cancel", style: "cancel" },
+                        ...(isProUser ? [] : [{
+                            text: "View Plans", 
+                            onPress: () => navigation.navigate("Subscription", { source: 'upload' })
+                        }])
+                    ]
+                );
+                return;
+            }
+
+            // 1. Perform OCR on the image
+            log("🟢 Step 2: Extracting text from image using ML Kit");
+            const recognizedTextArray = await TextRecognition.recognize(uri);
+            
+            // Join array of text blocks into a single string
+            const recognizedText = Array.isArray(recognizedTextArray) 
+                ? recognizedTextArray.join('\n') 
+                : recognizedTextArray;
+            
+            if (!recognizedText || recognizedText.trim().length === 0) {
+                throw new Error("No text found in the image. Please upload an image with visible text.");
+            }
+
+            log(`🟢 Step 3: Extracted ${recognizedText.length} characters of text`);
+
+            // 2. Get current user
+            log("🟢 Step 4: Authenticating user");
+            const getUserPromise = supabase.auth.getUser();
+            const getUserTimeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Authentication timeout. Please check your internet connection and try again.')), 15000);
+            });
+            
+            const { data: { user }, error: getUserError } = await Promise.race([getUserPromise, getUserTimeoutPromise]);
+            
+            if (getUserError) {
+                throw new Error(`Authentication error: ${getUserError.message}`);
+            }
+            
+            if (!user) {
+                throw new Error("User not authenticated. Please log in.");
+            }
+
+            // 3. Get user session token
+            log("🟢 Step 5: Getting session token");
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+                throw new Error("No active session. Please log in again.");
+            }
+
+            // 4. Call Edge Function with extracted text only
+            log("🟢 Step 6: Calling Edge Function with extracted text");
+            const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+            
+            const timeoutPromise = new Promise<Response>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout. Please check your internet connection and try again.')), 120000);
+            });
+            
+            const fetchPromise = fetch(`${baseUrl}${function_url}`, {
+                method: "POST", 
+                headers: {
+                    "Content-Type": "application/json", 
+                    apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+                    Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ 
+                    text_content: recognizedText,  // Send extracted text only
+                    content_type: "text"
+                }),
+            });
+            
+            const fnRes = await Promise.race([fetchPromise, timeoutPromise]); 
+
+            if (!fnRes.ok){
+                let errorMessage = "Something went wrong. Please try again.";
+                try {
+                    const errorData = await fnRes.json();
+                    if (errorData.error) {
+                        errorMessage = errorData.error;
+                    } else if (errorData.message) {
+                        errorMessage = errorData.message;
+                    }
+                } catch (parseError) {
+                    try {
+                        const errorText = await fnRes.text();
+                        if (errorText) {
+                            errorMessage = errorText;
+                        }
+                    } catch (textError) {
+                        // Use default message
+                    }
+                }
+                
+                if (fnRes.status === 429) {
+                    setLoading(false);
+                    Alert.alert(
+                        "Upload Limit Reached",
+                        errorMessage,
+                        [
+                            { text: "OK", style: "default" },
+                            ...(isProUser ? [] : [{
+                                text: "View Plans", 
+                                onPress: () => navigation.navigate("Subscription", { source: 'upload' })
+                            }])
+                        ]
+                    );
+                    await fetchSubscriptionData();
+                    return;
+                }
+                
+                throw new Error(errorMessage);
+            }
+
+            // 5. Parse response and get MCQs
+            log("🟢 Step 7: Parsing MCQs");
+            const result = await fnRes.json();
+            
+            if (!result.ok || !result.mcqs) {
+                throw new Error("Failed to generate MCQs");
+            }
+
+            log(`🟢 Step 8: Generated ${result.mcqs.length} MCQs successfully`);
+
+            // 6. Refresh subscription data
+            await fetchSubscriptionData();
+            addRecentUpload();
+
+            // 7. Navigate to Feed
+            log("🟢 Step 9: Navigating to Feed");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            
+            navigation.navigate('Feed', { 
+                mcqs: result.mcqs,
+                generated_at: result.generated_at,
+                count: result.count,
+                cached: result.cached || false,
+                rate_limit: result.rate_limit
+            });
+        } catch (e: any) {
+            logError('OCR error:', e);
+            setLoading(false);
+            
+            let errorMessage = "Something went wrong. Please try again.";
+            
+            if (e.message) {
+                if (e.message.includes('timeout') || e.message.includes('Request timeout')) {
+                    errorMessage = "Request timed out. Please check your internet connection and try again.";
+                } else if (e.message.includes('Network') || e.message.includes('Failed to fetch')) {
+                    errorMessage = "Network error. Please check your internet connection and try again.";
+                } else if (e.message.includes('No text found')) {
+                    errorMessage = e.message;
+                } else {
+                    errorMessage = getUserFriendlyError(e);
+                }
+            } else {
+                errorMessage = getUserFriendlyError(e);
+            }
+            
+            Alert.alert("Upload Error", errorMessage, [
+                { text: "OK", style: "default" }
+            ]);
+        } finally {
+            setLoading(false);
         }
-        
-        await handleUpload(uri, mimeType); 
     }
 
 

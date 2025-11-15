@@ -1,7 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-type Body = { file_data: string; mime_type: string };
+type Body = { 
+  file_data?: string; 
+  mime_type?: string;
+  text_content?: string;
+  content_type?: string;
+};
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 
@@ -287,6 +292,61 @@ function cacheMCQs(fileHash: string, mcqs: any[]): void {
 }
 
 /**
+ * Call Gemini API with text content (no file upload required)
+ */
+async function callGeminiWithText(textContent: string, prompt: string, maxRetries = 3) {
+  // Build request body for text-only input
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: prompt + "\n\nSTUDY MATERIAL:\n" + textContent },
+        ],
+      },
+    ],
+  };
+
+  // Retry logic for temporary failures
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" +
+          GEMINI_API_KEY,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        
+        // Check if it's a temporary error (5xx) and we have retries left
+        if (res.status >= 500 && attempt < maxRetries) {
+          console.log(`Attempt ${attempt} failed with ${res.status}, retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
+          continue;
+        }
+        
+        throw new Error(`Gemini API failed: ${errorText}`);
+      }
+
+      const data = await res.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "[]";
+      
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      console.log(`Attempt ${attempt} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+    }
+  }
+}
+
+/**
  * Call Gemini API with file data directly (no storage required)
  */
 async function callGeminiWithFileData(fileData: string, mimeType: string, prompt: string, maxRetries = 3) {
@@ -448,25 +508,34 @@ Deno.serve(async (req) => {
     }
 
     // 5. Parse request body
-    const { file_data, mime_type }: Body = await req.json();
+    const { file_data, mime_type, text_content, content_type }: Body = await req.json();
     
-    if (!file_data || !mime_type) {
+    // Check if either file_data or text_content is provided
+    if (!file_data && !text_content) {
       return new Response(
-        JSON.stringify({ ok: false, error: "file_data and mime_type are required" }),
+        JSON.stringify({ ok: false, error: "Either file_data or text_content is required" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    console.log("📄 File received, mime type:", mime_type);
+    // If file_data is provided, mime_type is required
+    if (file_data && !mime_type) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "mime_type is required when file_data is provided" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
-    // 6. Generate file hash for caching
-    const fileHash = generateFileHash(file_data);
-    console.log("🔑 File hash:", fileHash);
+    console.log("📄 Content received, type:", content_type || mime_type);
+
+    // 6. Generate content hash for caching
+    const contentHash = generateFileHash(text_content || file_data!);
+    console.log("🔑 Content hash:", contentHash);
 
     // 7. Check cache first
-    const cachedMCQs = getCachedMCQs(fileHash);
+    const cachedMCQs = getCachedMCQs(contentHash);
     if (cachedMCQs) {
-      console.log(`✅ Returning cached MCQs for hash: ${fileHash}`);
+      console.log(`✅ Returning cached MCQs for hash: ${contentHash}`);
       return new Response(
         JSON.stringify({ 
           ok: true, 
@@ -541,7 +610,15 @@ BAD EXAMPLES (DO NOT CREATE THESE):
 IMPORTANT: Generate questions that test users' understanding and knowledge of the subject matter. Focus on concepts, facts, and ideas that users should know and understand, not on specific wording or references to the source material. Users should be able to answer all questions based on their knowledge and comprehension of the topics covered.
 `;
 
-    const geminiRaw = await callGeminiWithFileData(file_data, mime_type, prompt);
+    let geminiRaw: string;
+    
+    // If text_content is provided, use text-based API
+    if (text_content) {
+      geminiRaw = await callGeminiWithText(text_content, prompt);
+    } else {
+      // Otherwise, use file-based API
+      geminiRaw = await callGeminiWithFileData(file_data!, mime_type!, prompt);
+    }
 
     // Parse MCQs - handle both JSON and markdown formats
     let mcqs: any[] = [];
@@ -579,7 +656,7 @@ IMPORTANT: Generate questions that test users' understanding and knowledge of th
     await incrementUserUsage(user.id, supabaseClient);
 
     // 10. Cache the MCQs for future use
-    cacheMCQs(fileHash, mcqs);
+    cacheMCQs(contentHash, mcqs);
 
     // Return MCQs directly (no database storage)
     return new Response(

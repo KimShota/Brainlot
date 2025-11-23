@@ -6,9 +6,12 @@ type Body = {
   mime_type?: string;
   text_content?: string;
   content_type?: string;
+  target_count?: number;
 };
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
+const DEFAULT_TARGET_COUNT = 20;
+const MAX_TARGET_COUNT = 40;
 
 // Global usage tracking
 let globalUsageCount = 0;
@@ -32,7 +35,7 @@ const USER_LIMITS = {
 
 // Cache for storing MCQs temporarily (in-memory)
 const mcqCache = new Map<string, { mcqs: any[], timestamp: number }>();
-const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 hours (extended for better cost savings)
 
 console.log("🚀 Deployed generate-mcqs function (Stateless Architecture with Usage Monitoring)");
 
@@ -292,127 +295,194 @@ function cacheMCQs(fileHash: string, mcqs: any[]): void {
 }
 
 /**
- * Call Gemini API with text content (no file upload required)
+ * Optimize text content by removing unnecessary whitespace and normalizing
  */
-async function callGeminiWithText(textContent: string, prompt: string, maxRetries = 3) {
-  // Build request body for text-only input
+function optimizeTextContent(text: string): string {
+  // Remove excessive whitespace (multiple spaces/newlines)
+  let optimized = text.replace(/\s+/g, ' ').trim();
+  
+  // Limit to reasonable length (prevent extremely long inputs)
+  const MAX_INPUT_LENGTH = 3000; // Reduced from 4000
+  if (optimized.length > MAX_INPUT_LENGTH) {
+    // Take first part and last part to preserve context
+    const firstPart = optimized.substring(0, MAX_INPUT_LENGTH * 0.6);
+    const lastPart = optimized.substring(optimized.length - MAX_INPUT_LENGTH * 0.4);
+    optimized = firstPart + '...' + lastPart;
+  }
+  
+  return optimized;
+}
+
+function buildNdjsonPrompt(targetCount: number): string {
+  return `Generate exactly ${targetCount} multiple-choice questions that test conceptual understanding of the provided material.
+Each MCQ must be challenging yet fair, never copy sentences verbatim, and avoid referencing "the text" or "the passage".
+
+Output format: newline-delimited JSON (NDJSON).
+Each line must be a standalone JSON object formatted as:
+{"q":"question text","o":["option1","option2","option3","option4"],"a":0}
+
+Rules:
+- "q" is the question text (string).
+- "o" is an array of exactly 4 concise options (strings).
+- "a" is the index (0-3) of the single correct option.
+- Do NOT wrap the objects in an array or add commentary, numbering, or explanations.
+- Only output the NDJSON lines.`;
+}
+
+async function* streamGeminiNDJSON(body: any): AsyncGenerator<string> {
+  const response = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent?key=" + GEMINI_API_KEY,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API failed: ${errorText}`);
+  }
+
+  if (!response.body) {
+    throw new Error("Gemini API returned an empty response body");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let pendingText = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const segments = buffer.split("\n");
+    buffer = segments.pop() ?? "";
+
+    for (const segment of segments) {
+      const line = segment.trim();
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+
+      let parsed;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+
+      const parts = parsed.candidates?.[0]?.content?.parts;
+      if (!parts) continue;
+
+      const textChunk = parts.map((part: any) => part?.text || "").join("");
+      if (!textChunk) continue;
+
+      pendingText += textChunk;
+      let newlineIndex: number;
+      while ((newlineIndex = pendingText.indexOf("\n")) >= 0) {
+        const rawLine = pendingText.slice(0, newlineIndex).trim();
+        pendingText = pendingText.slice(newlineIndex + 1);
+        if (rawLine) {
+          yield rawLine;
+        }
+      }
+    }
+  }
+
+  if (pendingText.trim()) {
+    yield pendingText.trim();
+  }
+}
+
+async function* streamMcqsFromText(textContent: string, targetCount: number): AsyncGenerator<string> {
+  const optimizedText = optimizeTextContent(textContent);
   const body = {
     contents: [
       {
         role: "user",
         parts: [
-          { text: prompt + "\n\nSTUDY MATERIAL:\n" + textContent },
+          { text: `${buildNdjsonPrompt(targetCount)}\n\n${optimizedText}` },
         ],
       },
     ],
+    generationConfig: {
+      maxOutputTokens: 1600,
+      temperature: 0.7,
+    },
   };
 
-  // Retry logic for temporary failures
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const res = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" +
-          GEMINI_API_KEY,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      );
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        
-        // Check if it's a temporary error (5xx) and we have retries left
-        if (res.status >= 500 && attempt < maxRetries) {
-          console.log(`Attempt ${attempt} failed with ${res.status}, retrying...`);
-          await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
-          continue;
-        }
-        
-        throw new Error(`Gemini API failed: ${errorText}`);
-      }
-
-      const data = await res.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "[]";
-      
-    } catch (error) {
-      if (attempt === maxRetries) {
-        throw error;
-      }
-      console.log(`Attempt ${attempt} failed, retrying...`);
-      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-    }
+  for await (const line of streamGeminiNDJSON(body)) {
+    yield line;
   }
 }
 
-/**
- * Call Gemini API with file data directly (no storage required)
- */
-async function callGeminiWithFileData(fileData: string, mimeType: string, prompt: string, maxRetries = 3) {
-  // Check file size (Gemini has a 20MB limit)
-  const fileSizeBytes = (fileData.length * 3) / 4; // base64 to actual size
+async function* streamMcqsFromFile(fileData: string, mimeType: string, targetCount: number): AsyncGenerator<string> {
+  const fileSizeBytes = (fileData.length * 3) / 4;
   const fileSizeMB = fileSizeBytes / (1024 * 1024);
-  
   if (fileSizeMB > 20) {
     throw new Error(`File too large: ${fileSizeMB.toFixed(1)}MB. Maximum size is 20MB. Please compress the file.`);
   }
 
-  // Build request body
   const body = {
     contents: [
       {
         role: "user",
         parts: [
-          { text: prompt },
+          { text: buildNdjsonPrompt(targetCount) },
           {
             inlineData: {
               mimeType,
-              data: fileData, // base64 encoded file data
+              data: fileData,
             },
           },
         ],
       },
     ],
+    generationConfig: {
+      maxOutputTokens: 2000,
+      temperature: 0.7,
+    },
   };
 
-  // Retry logic for temporary failures
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const res = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" +
-          GEMINI_API_KEY,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      );
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        
-        // Check if it's a temporary error (5xx) and we have retries left
-        if (res.status >= 500 && attempt < maxRetries) {
-          console.log(`Attempt ${attempt} failed with ${res.status}, retrying...`);
-          await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
-          continue;
-        }
-        
-        throw new Error(`Gemini API failed: ${errorText}`);
-      }
-
-      const data = await res.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "[]";
-      
-    } catch (error) {
-      if (attempt === maxRetries) {
-        throw error;
-      }
-      console.log(`Attempt ${attempt} failed, retrying...`);
-      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-    }
+  for await (const line of streamGeminiNDJSON(body)) {
+    yield line;
   }
+}
+
+function normalizeMcqShape(mcq: any) {
+  const options = mcq?.options || mcq?.o || [];
+  return {
+    question: mcq?.question || mcq?.q || "",
+    options,
+    answer_index: typeof mcq?.answer_index === "number"
+      ? mcq.answer_index
+      : (typeof mcq?.a === "number" ? mcq.a : 0),
+  };
+}
+
+function mapStreamError(error: any): string {
+  const message = error?.message || String(error);
+  if (message.includes("timeout")) {
+    return "Request timed out. Please check your internet connection and try again.";
+  }
+  if (message.includes("Unauthorized") || message.includes("Invalid token")) {
+    return "Authentication failed. Please log in again.";
+  }
+  if (message.includes("File too large")) {
+    return message;
+  }
+  if (message.includes("Failed to fetch")) {
+    return "Network error. Please check your connection and try again.";
+  }
+  if (message.includes("No MCQs generated")) {
+    return message;
+  }
+  if (message.includes("Gemini API failed")) {
+    return "AI service is temporarily unavailable. Please try again later.";
+  }
+  return "An unexpected error occurred. Please try again.";
 }
 
 Deno.serve(async (req) => {
@@ -480,35 +550,14 @@ Deno.serve(async (req) => {
     
     console.log("✅ User authenticated:", user.id);
 
-    // 4. Get user subscription and check limits
-    const subscription = await getUserSubscription(user.id, supabaseClient);
-    console.log(`👤 User ${user.id} subscription: ${subscription}`);
-    
-    const userLimits = await checkUserLimits(user.id, subscription, supabaseClient);
-    if (!userLimits.allowed) {
-      const resetTimeHours = Math.ceil((userLimits.resetTime - Date.now()) / (60 * 60 * 1000));
-      const resetTimeDays = Math.ceil((userLimits.resetTime - Date.now()) / (24 * 60 * 60 * 1000));
-      
-      // Daily limit only (monthly limit removed)
-      const errorMessage = `Daily limit reached. You can generate MCQs again in ${resetTimeDays} days.`;
-      
-      return new Response(
-        JSON.stringify({ 
-          ok: false, 
-          error: errorMessage,
-          user_limits: {
-            subscription: subscription,
-            limit_type: userLimits.limitType,
-            remaining: 0,
-            reset_time: userLimits.resetTime
-          }
-        }),
-        { status: 429, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // 5. Parse request body
-    const { file_data, mime_type, text_content, content_type }: Body = await req.json();
+    // 4. Parse request body
+    const { 
+      file_data, 
+      mime_type, 
+      text_content, 
+      content_type,
+      target_count
+    }: Body = await req.json();
     
     // Check if either file_data or text_content is provided
     if (!file_data && !text_content) {
@@ -528,156 +577,106 @@ Deno.serve(async (req) => {
 
     console.log("📄 Content received, type:", content_type || mime_type);
 
+    const targetCount = Math.max(1, Math.min(target_count ?? DEFAULT_TARGET_COUNT, MAX_TARGET_COUNT));
+
+    // 5. Get user subscription and check limits
+    const subscription = await getUserSubscription(user.id, supabaseClient);
+    console.log(`👤 User ${user.id} subscription: ${subscription}`);
+    
+    const userLimits = await checkUserLimits(user.id, subscription, supabaseClient);
+    if (!userLimits.allowed) {
+      const resetTimeDays = Math.ceil((userLimits.resetTime - Date.now()) / (24 * 60 * 60 * 1000));
+      const errorMessage = `Daily limit reached. You can generate MCQs again in ${resetTimeDays} days.`;
+      return new Response(
+        JSON.stringify({ 
+          ok: false, 
+          error: errorMessage,
+          user_limits: {
+            subscription: subscription,
+            limit_type: userLimits.limitType,
+            remaining: 0,
+            reset_time: userLimits.resetTime
+          }
+        }),
+        { status: 429, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     // 6. Generate content hash for caching
-    const contentHash = generateFileHash(text_content || file_data!);
+    const cacheKeySeed = `${text_content || file_data!}::target-${targetCount}`;
+    const contentHash = generateFileHash(cacheKeySeed);
     console.log("🔑 Content hash:", contentHash);
 
     // 7. Check cache first
     const cachedMCQs = getCachedMCQs(contentHash);
-    if (cachedMCQs) {
-      console.log(`✅ Returning cached MCQs for hash: ${contentHash}`);
-      return new Response(
-        JSON.stringify({ 
-          ok: true, 
-          mcqs: cachedMCQs,
-          generated_at: new Date().toISOString(),
-          count: cachedMCQs.length,
-          cached: true,
-          user_limits: {
-            subscription: subscription,
-            remaining: userLimits.remaining,
-            reset_time: userLimits.resetTime
-          },
-          global_usage: {
-            remaining: globalUsage.remaining,
-            reset_time: globalUsage.resetTime
-          }
-        }),
-        { headers: { "Content-Type": "application/json" } }
-      );
-    }
+    const stream = new TransformStream();
+    const writer = stream.writable.getWriter();
 
-    // 8. Generate new MCQs if not cached
-    console.log("🤖 Generating new MCQs...");
-    
-    const prompt = `
-You are an expert MCQ generator. Create 30 high-quality multiple-choice questions that test users' understanding and knowledge of the concepts, facts, and ideas covered in the study material.
-
-CRITICAL REQUIREMENTS:
-1. Questions MUST test understanding and knowledge of concepts, facts, and ideas - NOT retrieval of specific text passages
-2. Questions must be answerable from MEMORY and COMPREHENSION - users should NOT need to look back at the material
-3. NEVER use words like "text", "document", "passage", "material", "according to", "mentioned", "stated", "explained", "notes", or "discusses" in the question itself
-4. Focus on testing KNOWLEDGE and UNDERSTANDING of the subject matter, not memory of specific wording
-5. Each question must have exactly 4 options
-6. Include "answer_index" (0-based index) for the correct answer
-7. Respond ONLY with a valid JSON array - no markdown, no code blocks, no additional text
-
-QUESTION TYPES TO INCLUDE:
-- Factual knowledge questions (definitions, key facts, numbers, measurements)
-- Conceptual understanding questions (processes, relationships, cause and effect)
-- Application questions (using knowledge to solve problems or make predictions)
-- Analysis questions (comparing, contrasting, identifying patterns)
-- Questions about concepts, theories, formulas, or principles
-- Questions about historical events, people, dates, or facts
-- Questions about scientific processes, chemical reactions, or biological processes
-- Questions about mathematical concepts, equations, or calculations
-
-QUESTION TYPES TO STRICTLY AVOID:
-- ANY questions that reference "text", "document", "passage", "material", "according to", "mentioned", "stated", "explained", "notes", "discusses"
-- Questions asking "what does the image/figure/chart show" or "what is depicted in the image"
-- Questions about document layout, structure, or organization
-- Questions asking "where to find information" or "which page/section"
-- Questions about study tips, learning strategies, or methodology
-- Questions not directly covered in the provided material
-- Questions requiring visual inspection of the material
-- Questions about colors, shapes, or visual characteristics
-- Questions asking users to identify something "in the picture" or "shown in the image"
-
-GOOD EXAMPLES:
-{ "question": "What is the resolving power of a light microscope?", "options": ["0.2 nm", "200 nm", "2 μm", "0.2 μm"], "answer_index": 1 }
-{ "question": "Which process occurs during photosynthesis?", "options": ["Glucose breakdown", "Carbon dioxide absorption", "Protein synthesis", "DNA replication"], "answer_index": 1 }
-{ "question": "What is the chemical formula for water?", "options": ["H2O", "CO2", "NaCl", "O2"], "answer_index": 0 }
-{ "question": "Who was the first African American to serve in the U.S. Senate?", "options": ["Frederick Douglass", "Hiram Revels", "Booker T. Washington", "W.E.B. Du Bois"], "answer_index": 1 }
-{ "question": "What type of sound sources exist besides musical instruments and traffic?", "options": ["Electronic devices", "Natural phenomena", "Human voices", "Animal sounds"], "answer_index": 1 }
-{ "question": "How does the speed of sound change with temperature?", "options": ["Increases by 0.6 m/s per °C", "Decreases by 0.6 m/s per °C", "Remains constant", "Increases by 3.31 m/s per °C"], "answer_index": 0 }
-
-BAD EXAMPLES (DO NOT CREATE THESE):
-{ "question": "The text notes that sound waves are created by vibrations", "options": ["True", "False", "Sometimes", "Never"], "answer_index": 0 }
-{ "question": "According to the text, what is the speed of sound?", "options": ["343 m/s", "300 m/s", "400 m/s", "250 m/s"], "answer_index": 0 }
-{ "question": "What does the text explain about temperature?", "options": ["It affects sound speed", "It doesn't matter", "It's constant", "It varies"], "answer_index": 0 }
-{ "question": "The passage mentions that...", "options": ["Option A", "Option B", "Option C", "Option D"], "answer_index": 0 }
-
-IMPORTANT: Generate questions that test users' understanding and knowledge of the subject matter. Focus on concepts, facts, and ideas that users should know and understand, not on specific wording or references to the source material. Users should be able to answer all questions based on their knowledge and comprehension of the topics covered.
-`;
-
-    let geminiRaw: string;
-    
-    // If text_content is provided, use text-based API
-    if (text_content) {
-      geminiRaw = await callGeminiWithText(text_content, prompt);
-    } else {
-      // Otherwise, use file-based API
-      geminiRaw = await callGeminiWithFileData(file_data!, mime_type!, prompt);
-    }
-
-    // Parse MCQs - handle both JSON and markdown formats
-    let mcqs: any[] = [];
-    try {
-      // First try to parse as direct JSON
-      mcqs = JSON.parse(geminiRaw);
-    } catch {
+    (async () => {
       try {
-        // If that fails, try to extract JSON from markdown format
-        const jsonMatch = geminiRaw.match(/```json\s*([\s\S]*?)\s*```/);
-        if (jsonMatch && jsonMatch[1]) {
-          mcqs = JSON.parse(jsonMatch[1].trim());
-        } else {
-          // Try to find JSON array pattern without markdown
-          const arrayMatch = geminiRaw.match(/\[\s*\{[\s\S]*\}\s*\]/);
-          if (arrayMatch && arrayMatch[0]) {
-            mcqs = JSON.parse(arrayMatch[0]);
-          } else {
-            throw new Error("Could not extract JSON from response");
+        if (cachedMCQs) {
+          console.log(`✅ Streaming cached MCQs for hash: ${contentHash}`);
+          await writer.write(JSON.stringify({ type: "meta", total: cachedMCQs.length, cached: true }) + "\n");
+          for (const mcq of cachedMCQs) {
+            await writer.write(JSON.stringify({ type: "mcq", data: mcq }) + "\n");
+          }
+          await writer.write(JSON.stringify({ type: "done", count: cachedMCQs.length }) + "\n");
+          return;
+        }
+
+        incrementGlobalUsage();
+        await incrementUserUsage(user.id, supabaseClient);
+
+        await writer.write(JSON.stringify({ type: "meta", total: targetCount, cached: false }) + "\n");
+
+        const collected: any[] = [];
+        const generator = text_content
+          ? streamMcqsFromText(text_content, targetCount)
+          : streamMcqsFromFile(file_data!, mime_type!, targetCount);
+
+        for await (const rawLine of generator) {
+          if (!rawLine) continue;
+          let parsed;
+          try {
+            parsed = JSON.parse(rawLine);
+                  } catch {
+            continue;
+          }
+
+          const normalized = normalizeMcqShape(parsed);
+          if (!normalized.question || !Array.isArray(normalized.options) || normalized.options.length !== 4) {
+            continue;
+          }
+
+          collected.push(normalized);
+          await writer.write(JSON.stringify({ type: "mcq", data: normalized }) + "\n");
+
+          if (collected.length >= targetCount) {
+            break;
           }
         }
-      } catch (parseError) {
-        throw new Error("Gemini did not return valid JSON. Raw response: " + geminiRaw);
-      }
-    }
 
-    if (!Array.isArray(mcqs)) {
-      throw new Error("Gemini response is not an array: " + geminiRaw);
-    }
-
-    console.log(`✅ Generated ${mcqs.length} MCQs successfully`);
-
-    // 9. Increment usage counters
-    incrementGlobalUsage();
-    await incrementUserUsage(user.id, supabaseClient);
-
-    // 10. Cache the MCQs for future use
-    cacheMCQs(contentHash, mcqs);
-
-    // Return MCQs directly (no database storage)
-    return new Response(
-      JSON.stringify({ 
-        ok: true, 
-        mcqs: mcqs,
-        generated_at: new Date().toISOString(),
-        count: mcqs.length,
-        cached: false,
-        user_limits: {
-          subscription: subscription,
-          remaining: userLimits.remaining - 1,
-          reset_time: userLimits.resetTime
-        },
-        global_usage: {
-          remaining: globalUsage.remaining - 1,
-          reset_time: globalUsage.resetTime
+        if (collected.length === 0) {
+          throw new Error("No MCQs generated. Please try again with clearer content.");
         }
-      }),
-      { headers: { "Content-Type": "application/json" } }
-    );
+
+        cacheMCQs(contentHash, collected);
+        await writer.write(JSON.stringify({ type: "done", count: collected.length }) + "\n");
+      } catch (streamError) {
+        console.error("Streaming generation error:", streamError);
+        const message = mapStreamError(streamError);
+        await writer.write(JSON.stringify({ type: "error", message }) + "\n");
+      } finally {
+        writer.close();
+      }
+    })();
+
+    return new Response(stream.readable, {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Cache-Control": "no-store",
+      },
+    });
 
   } catch (e) {
     console.error("Edge function error:", e);

@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from "react";
 import { View, Text, Button, Alert, ActivityIndicator, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Modal, Animated, TextInput, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import * as Haptics from 'expo-haptics';
 import { supabase } from "../lib/supabase";
 import { log, warn, error as logError } from "../lib/logger";
@@ -13,9 +14,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import * as WebBrowser from "expo-web-browser"; 
 import TextRecognition from 'react-native-text-recognition';
+import { createStreamingSource, StreamingSource } from "../services/streamingSourceStore";
 
-//URL to supabase edge function
-const function_url = "/functions/v1/generate-mcqs"; 
 
 //main function 
 export default function UploadScreen({ navigation }: any ){
@@ -26,7 +26,7 @@ export default function UploadScreen({ navigation }: any ){
     const [showTextInputModal, setShowTextInputModal] = useState(false);
     const [textInput, setTextInput] = useState('');
     const MAX_TEXT_LENGTH = 4000;
-    const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount, refreshSubscription, addRecentUpload, fetchSubscriptionData, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
+    const { canUpload, uploadCount, uploadLimit, isProUser, refreshSubscription, fetchSubscriptionData, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
 
     // Check and reset daily uploads when screen comes into focus
     // This ensures daily_reset_at is checked every time user navigates to upload screen
@@ -104,6 +104,10 @@ export default function UploadScreen({ navigation }: any ){
         return true;
     };
 
+    function navigateWithStreamingSource(source: StreamingSource) {
+        const sourceId = createStreamingSource(source);
+        navigation.navigate('Feed', { streamingSourceId: sourceId });
+    }
     // Handle logout session 
     const handleLogout = async () => {
         Alert.alert(
@@ -188,15 +192,13 @@ export default function UploadScreen({ navigation }: any ){
             return;
         }
 
-        // Close modal
         setShowTextInputModal(false);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
         try {
-            log("🟢 Step 1: Starting text processing");
+            log("🟢 Starting text input generation flow");
             setLoading(true);
 
-            // Check upload limit
             if (!canUpload) {
                 const limitText = `${uploadLimit} files per day`;
                 Alert.alert(
@@ -213,123 +215,10 @@ export default function UploadScreen({ navigation }: any ){
                 return;
             }
 
-            log(`🟢 Step 2: Processing ${textInput.length} characters of text`);
-
-            // Get current user
-            log("🟢 Step 3: Authenticating user");
-            const getUserPromise = supabase.auth.getUser();
-            const getUserTimeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('Authentication timeout. Please check your internet connection and try again.')), 15000);
-            });
-            
-            const { data: { user }, error: getUserError } = await Promise.race([getUserPromise, getUserTimeoutPromise]);
-            
-            if (getUserError) {
-                throw new Error(`Authentication error: ${getUserError.message}`);
-            }
-            
-            if (!user) {
-                throw new Error("User not authenticated. Please log in.");
-            }
-
-            // Get user session token
-            log("🟢 Step 4: Getting session token");
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                throw new Error("No active session. Please log in again.");
-            }
-
-            // Call Edge Function with text content
-            log("🟢 Step 5: Calling Edge Function with text content");
-            const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-            
-            const timeoutPromise = new Promise<Response>((_, reject) => {
-                setTimeout(() => reject(new Error('Request timeout. Please check your internet connection and try again.')), 120000);
-            });
-            
-            const fetchPromise = fetch(`${baseUrl}${function_url}`, {
-                method: "POST", 
-                headers: {
-                    "Content-Type": "application/json", 
-                    apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-                    Authorization: `Bearer ${session.access_token}`,
-                },
-                body: JSON.stringify({ 
-                    text_content: textInput.trim(),
-                    content_type: "text"
-                }),
-            });
-            
-            const fnRes = await Promise.race([fetchPromise, timeoutPromise]); 
-
-            if (!fnRes.ok){
-                let errorMessage = "Something went wrong. Please try again.";
-                try {
-                    const errorData = await fnRes.json();
-                    if (errorData.error) {
-                        errorMessage = errorData.error;
-                    } else if (errorData.message) {
-                        errorMessage = errorData.message;
-                    }
-                } catch (parseError) {
-                    try {
-                        const errorText = await fnRes.text();
-                        if (errorText) {
-                            errorMessage = errorText;
-                        }
-                    } catch (textError) {
-                        // Use default message
-                    }
-                }
-                
-                if (fnRes.status === 429) {
-                    setLoading(false);
-                    Alert.alert(
-                        "Upload Limit Reached",
-                        errorMessage,
-                        [
-                            { text: "OK", style: "default" },
-                            ...(isProUser ? [] : [{
-                                text: "View Plans", 
-                                onPress: () => navigation.navigate("Subscription", { source: 'upload' })
-                            }])
-                        ]
-                    );
-                    await fetchSubscriptionData();
-                    return;
-                }
-                
-                throw new Error(errorMessage);
-            }
-
-            // Parse response and get MCQs
-            log("🟢 Step 6: Parsing MCQs");
-            const result = await fnRes.json();
-            
-            if (!result.ok || !result.mcqs) {
-                throw new Error("Failed to generate MCQs");
-            }
-
-            log(`🟢 Step 7: Generated ${result.mcqs.length} MCQs successfully`);
-
-            // Refresh subscription data
-            await fetchSubscriptionData();
-            addRecentUpload();
-
-            // Navigate to Feed
-            log("🟢 Step 8: Navigating to Feed");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            
-            navigation.navigate('Feed', { 
-                mcqs: result.mcqs,
-                generated_at: result.generated_at,
-                count: result.count,
-                cached: result.cached || false,
-                rate_limit: result.rate_limit
-            });
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            navigateWithStreamingSource({ type: "text", text: textInput.trim() });
         } catch (e: any) {
             logError('Text processing error:', e);
-            setLoading(false);
             
             let errorMessage = "Something went wrong. Please try again.";
             
@@ -383,7 +272,7 @@ export default function UploadScreen({ navigation }: any ){
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images, 
             base64: false, 
-            quality: 0.7, // Reduced quality to 70% for smaller file size
+            quality: 0.8, // Initial quality (will be further optimized during processing)
             allowsEditing: false,
         }); 
         if (result.canceled || !result.assets?.[0]) return; 
@@ -392,6 +281,40 @@ export default function UploadScreen({ navigation }: any ){
         
         // Extract text from image using OCR
         await handleImageOCR(uri); 
+    }
+
+    // Helper function to resize image for faster processing
+    async function resizeImageForOCR(uri: string): Promise<string> {
+        try {
+            log("🟢 Resizing image for OCR (max width: 1920px)");
+            const manipResult = await ImageManipulator.manipulateAsync(
+                uri,
+                [{ resize: { width: 1920 } }], // Max width 1920px for OCR (sufficient for text recognition)
+                { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+            );
+            log(`🟢 Image resized: ${manipResult.uri}`);
+            return manipResult.uri;
+        } catch (error) {
+            logError("Error resizing image for OCR, using original:", error);
+            return uri; // Fallback to original if resize fails
+        }
+    }
+
+    // Helper function to resize and compress image for upload
+    async function resizeImageForUpload(uri: string): Promise<string> {
+        try {
+            log("🟢 Resizing and compressing image for upload (max width: 2048px)");
+            const manipResult = await ImageManipulator.manipulateAsync(
+                uri,
+                [{ resize: { width: 2048 } }], // Max width 2048px
+                { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG } // Lower quality for smaller file size
+            );
+            log(`🟢 Image compressed: ${manipResult.uri}`);
+            return manipResult.uri;
+        } catch (error) {
+            logError("Error resizing image for upload, using original:", error);
+            return uri; // Fallback to original if resize fails
+        }
     }
 
     // Function to extract text from image using OCR
@@ -417,9 +340,13 @@ export default function UploadScreen({ navigation }: any ){
                 return;
             }
 
-            // 1. Perform OCR on the image
-            log("🟢 Step 2: Extracting text from image using ML Kit");
-            const recognizedTextArray = await TextRecognition.recognize(uri);
+            // 1. Resize image for faster OCR processing
+            log("🟢 Step 2: Resizing image for OCR");
+            const resizedUri = await resizeImageForOCR(uri);
+
+            // 2. Perform OCR on the resized image
+            log("🟢 Step 3: Extracting text from image using ML Kit");
+            const recognizedTextArray = await TextRecognition.recognize(resizedUri);
             
             // Join array of text blocks into a single string
             const recognizedText = Array.isArray(recognizedTextArray) 
@@ -430,123 +357,12 @@ export default function UploadScreen({ navigation }: any ){
                 throw new Error("No text found in the image. Please upload an image with visible text.");
             }
 
-            log(`🟢 Step 3: Extracted ${recognizedText.length} characters of text`);
+            log(`🟢 Step 4: Extracted ${recognizedText.length} characters of text`);
 
-            // 2. Get current user
-            log("🟢 Step 4: Authenticating user");
-            const getUserPromise = supabase.auth.getUser();
-            const getUserTimeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('Authentication timeout. Please check your internet connection and try again.')), 15000);
-            });
-            
-            const { data: { user }, error: getUserError } = await Promise.race([getUserPromise, getUserTimeoutPromise]);
-            
-            if (getUserError) {
-                throw new Error(`Authentication error: ${getUserError.message}`);
-            }
-            
-            if (!user) {
-                throw new Error("User not authenticated. Please log in.");
-            }
-
-            // 3. Get user session token
-            log("🟢 Step 5: Getting session token");
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                throw new Error("No active session. Please log in again.");
-            }
-
-            // 4. Call Edge Function with extracted text only
-            log("🟢 Step 6: Calling Edge Function with extracted text");
-            const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-            
-            const timeoutPromise = new Promise<Response>((_, reject) => {
-                setTimeout(() => reject(new Error('Request timeout. Please check your internet connection and try again.')), 120000);
-            });
-            
-            const fetchPromise = fetch(`${baseUrl}${function_url}`, {
-                method: "POST", 
-                headers: {
-                    "Content-Type": "application/json", 
-                    apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-                    Authorization: `Bearer ${session.access_token}`,
-                },
-                body: JSON.stringify({ 
-                    text_content: recognizedText,  // Send extracted text only
-                    content_type: "text"
-                }),
-            });
-            
-            const fnRes = await Promise.race([fetchPromise, timeoutPromise]); 
-
-            if (!fnRes.ok){
-                let errorMessage = "Something went wrong. Please try again.";
-                try {
-                    const errorData = await fnRes.json();
-                    if (errorData.error) {
-                        errorMessage = errorData.error;
-                    } else if (errorData.message) {
-                        errorMessage = errorData.message;
-                    }
-                } catch (parseError) {
-                    try {
-                        const errorText = await fnRes.text();
-                        if (errorText) {
-                            errorMessage = errorText;
-                        }
-                    } catch (textError) {
-                        // Use default message
-                    }
-                }
-                
-                if (fnRes.status === 429) {
-                    setLoading(false);
-                    Alert.alert(
-                        "Upload Limit Reached",
-                        errorMessage,
-                        [
-                            { text: "OK", style: "default" },
-                            ...(isProUser ? [] : [{
-                                text: "View Plans", 
-                                onPress: () => navigation.navigate("Subscription", { source: 'upload' })
-                            }])
-                        ]
-                    );
-                    await fetchSubscriptionData();
-                    return;
-                }
-                
-                throw new Error(errorMessage);
-            }
-
-            // 5. Parse response and get MCQs
-            log("🟢 Step 7: Parsing MCQs");
-            const result = await fnRes.json();
-            
-            if (!result.ok || !result.mcqs) {
-                throw new Error("Failed to generate MCQs");
-            }
-
-            log(`🟢 Step 8: Generated ${result.mcqs.length} MCQs successfully`);
-
-            // 6. Refresh subscription data
-            await fetchSubscriptionData();
-            addRecentUpload();
-
-            // 7. Navigate to Feed
-            log("🟢 Step 9: Navigating to Feed");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            
-            navigation.navigate('Feed', { 
-                mcqs: result.mcqs,
-                generated_at: result.generated_at,
-                count: result.count,
-                cached: result.cached || false,
-                rate_limit: result.rate_limit
-            });
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            navigateWithStreamingSource({ type: "text", text: recognizedText });
         } catch (e: any) {
             logError('OCR error:', e);
-            setLoading(false);
             
             let errorMessage = "Something went wrong. Please try again.";
             
@@ -610,26 +426,13 @@ export default function UploadScreen({ navigation }: any ){
                 throw new Error("Invalid file type. Please upload an image file (JPEG, PNG, GIF, WebP).");
             }
 
-            // 2. Get current user with timeout
-            log("🟢 Step 3: Authenticating user");
-            const getUserPromise = supabase.auth.getUser();
-            const getUserTimeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('Authentication timeout. Please check your internet connection and try again.')), 15000); // 15 seconds timeout
-            });
-            
-            const { data: { user }, error: getUserError } = await Promise.race([getUserPromise, getUserTimeoutPromise]);
-            
-            if (getUserError) {
-                throw new Error(`Authentication error: ${getUserError.message}`);
-            }
-            
-            if (!user) {
-                throw new Error("User not authenticated. Please log in.");
-            }
+            // 2. Resize and compress image before processing
+            log("🟢 Step 3: Resizing and compressing image");
+            const resizedUri = await resizeImageForUpload(uri);
 
             // 3. Load file and validate size
             log("🟢 Step 4: Loading file");
-            const file = await fetch(uri);
+            const file = await fetch(resizedUri);
             const arrayBuffer = await file.arrayBuffer();
             const uint8Array = new Uint8Array(arrayBuffer);
             
@@ -639,130 +442,21 @@ export default function UploadScreen({ navigation }: any ){
                 throw new Error(`File too large. Maximum size is 20MB. Your file is ${(uint8Array.length / 1024 / 1024).toFixed(1)}MB.`);
             }
 
-            // 4. Convert file to base64
+            // 4. Convert file to base64 (optimized with larger chunks)
             log("🟢 Step 6: Encoding file to base64");
             let binaryStr = '';
-            for (let i = 0; i < uint8Array.length; i += 8192) {
-                const chunk = uint8Array.slice(i, i + 8192);
+            // Use larger chunks (16384 bytes) for better performance
+            for (let i = 0; i < uint8Array.length; i += 16384) {
+                const chunk = uint8Array.slice(i, i + 16384);
                 binaryStr += String.fromCharCode(...chunk);
             }
             const base64Data = btoa(binaryStr);
             log(`🟢 Step 7: File encoded (${(base64Data.length / 1024 / 1024).toFixed(2)} MB)`);
 
-            // 5. Get user session token
-            log("🟢 Step 8: Getting session token");
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                throw new Error("No active session. Please log in again.");
-            }
-
-            // 6. Call Edge Function with file data directly (no storage upload)
-            log("🟢 Step 9: Calling Edge Function");
-            const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-            
-            // Add timeout to prevent infinite loading
-            const timeoutPromise = new Promise<Response>((_, reject) => {
-                setTimeout(() => reject(new Error('Request timeout. Please check your internet connection and try again.')), 120000); // 2 minutes timeout
-            });
-            
-            const fetchPromise = fetch(`${baseUrl}${function_url}`, {
-                method: "POST", 
-                headers: {
-                    "Content-Type": "application/json", 
-                    apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-                    Authorization: `Bearer ${session.access_token}`,
-                },
-                body: JSON.stringify({ 
-                    file_data: base64Data,  // Send file data directly
-                    mime_type: mime
-                }),
-            });
-            
-            const fnRes = await Promise.race([fetchPromise, timeoutPromise]); 
-
-            if (!fnRes.ok){
-                // Try to parse JSON error response first
-                let errorMessage = "Something went wrong. Please try again.";
-                try {
-                    const errorData = await fnRes.json();
-                    if (errorData.error) {
-                        errorMessage = errorData.error;
-                    } else if (errorData.message) {
-                        errorMessage = errorData.message;
-                    }
-                } catch (parseError) {
-                    // If JSON parsing fails, try text
-                    try {
-                        const errorText = await fnRes.text();
-                        if (errorText) {
-                            errorMessage = errorText;
-                        }
-                    } catch (textError) {
-                        // Use default message
-                    }
-                }
-                
-                // Handle rate limit errors (429) immediately
-                if (fnRes.status === 429) {
-                    setLoading(false);
-                    Alert.alert(
-                        "Upload Limit Reached",
-                        errorMessage,
-                        [
-                            { text: "OK", style: "default" },
-                            ...(isProUser ? [] : [{
-                                text: "View Plans", 
-                                onPress: () => navigation.navigate("Subscription", { source: 'upload' })
-                            }])
-                        ]
-                    );
-                    // Refresh subscription data to update UI
-                    await fetchSubscriptionData();
-                    return;
-                }
-                
-                throw new Error(errorMessage);
-            }
-
-            // 7. Parse response and get MCQs
-            log("🟢 Step 10: Parsing MCQs");
-            const result = await fnRes.json();
-            
-            if (!result.ok || !result.mcqs) {
-                throw new Error("Failed to generate MCQs");
-            }
-
-            log(`🟢 Step 11: Generated ${result.mcqs.length} MCQs successfully`);
-
-            // 8. Check rate limit info
-            if (result.rate_limit) {
-                log(`🟢 Rate limit: ${result.rate_limit.remaining} remaining, resets at ${new Date(result.rate_limit.reset_time).toLocaleString()}`);
-            }
-
-            // 9. Refresh subscription data (backend already incremented the count)
-            // Note: Backend increments the count, so we just refresh the frontend state
-            // Use fetchSubscriptionData directly to avoid loading state conflicts
-            await fetchSubscriptionData();
-            // Add to recent uploads for Pro user rate limiting
-            addRecentUpload();
-
-            // 10. Navigate to Feed with MCQs
-            log("🟢 Step 12: Navigating to Feed");
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            
-            // Navigate to Feed with MCQs directly (no database storage)
-            navigation.navigate('Feed', { 
-                mcqs: result.mcqs,
-                generated_at: result.generated_at,
-                count: result.count,
-                cached: result.cached || false,
-                rate_limit: result.rate_limit
-            });
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            navigateWithStreamingSource({ type: "file", fileData: base64Data, mimeType: mime });
         } catch (e: any) {
             logError('Upload error:', e);
-            
-            // Ensure loading is stopped immediately
-            setLoading(false);
             
             // Use user-friendly error message
             let errorMessage = "Something went wrong. Please try again.";

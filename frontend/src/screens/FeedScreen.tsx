@@ -19,8 +19,19 @@ import { log, error as logError } from "../lib/logger";
 import { getUserFriendlyError } from "../lib/errorUtils";
 import MCQCard from "../components/MCQCard";
 import { useTheme } from "../contexts/ThemeContext";
+import { useSubscription } from "../contexts/SubscriptionContext";
+import { getStreamingSource, removeStreamingSource, StreamingSource } from "../services/streamingSourceStore";
 
-const PAGE = 8; // each request will return 8 quizzes 
+const STREAM_TARGET_COUNT = 20;
+const function_url = "/functions/v1/generate-mcqs";
+
+const normalizeMcq = (mcq: any) => ({
+    question: mcq?.question || mcq?.q || "",
+    options: mcq?.options || mcq?.o || [],
+    answer_index: typeof mcq?.answer_index === "number"
+        ? mcq.answer_index
+        : (typeof mcq?.a === "number" ? mcq.a : 0),
+});
 
 //main function
 export default function FeedScreen({ navigation, route }: any) {
@@ -34,29 +45,221 @@ export default function FeedScreen({ navigation, route }: any) {
         [win.height]
     ); 
 
-    // Get MCQs from route params (passed from UploadScreen)
+    const { addRecentUpload, fetchSubscriptionData } = useSubscription();
+
     const routeMcqs = route?.params?.mcqs || [];
+    const streamingSourceId = route?.params?.streamingSourceId || null;
     
-    const [items, setItems] = useState<any[]>(routeMcqs); 
-    const [loading, setLoading] = useState(false);
+    const [items, setItems] = useState<any[]>(routeMcqs);
     const [error, setError] = useState<string | null>(null);
     const [showSwipeHint, setShowSwipeHint] = useState(false);
     const [currentQuestion, setCurrentQuestion] = useState(0);
     const [correctAnswers, setCorrectAnswers] = useState(0);
     const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
     const [userAnswers, setUserAnswers] = useState<Map<string, number>>(new Map());
+    const [isStreaming, setIsStreaming] = useState<boolean>(Boolean(streamingSourceId));
+    const [isInitialLoading, setIsInitialLoading] = useState<boolean>(Boolean(streamingSourceId) && routeMcqs.length === 0);
+    const [streamingError, setStreamingError] = useState<string | null>(null);
+    const [expectedCount, setExpectedCount] = useState<number | null>(null);
+
+    const streamAbortRef = useRef<AbortController | null>(null);
+    const streamStartedRef = useRef(false);
+    const uploadLoggedRef = useRef(false);
     
-    // Update items when route params change
     useEffect(() => {
         if (route?.params?.mcqs) {
-            log(`📚 Loaded ${route.params.mcqs.length} MCQs from upload`);
+            log(`📚 Loaded ${route.params.mcqs.length} MCQs from upload (legacy flow)`);
             setItems(route.params.mcqs);
             setCurrentQuestion(0);
             setCorrectAnswers(0);
             setAnsweredQuestions(new Set());
             setUserAnswers(new Map());
+            setIsStreaming(false);
+            setIsInitialLoading(false);
+            setStreamingError(null);
         }
-    }, [route?.params?.mcqs]); 
+    }, [route?.params?.mcqs]);
+
+    const appendMcq = useCallback((mcq: any) => {
+        setItems(prev => [...prev, mcq]);
+    }, []);
+
+    const handleStreamLine = useCallback((line: string) => {
+        try {
+            const payload = JSON.parse(line);
+            if (payload.type === "meta" && typeof payload.total === "number") {
+                setExpectedCount(payload.total);
+                return;
+            }
+            if (payload.type === "mcq" && payload.data) {
+                const normalized = normalizeMcq(payload.data);
+                appendMcq(normalized);
+                if (!uploadLoggedRef.current) {
+                    uploadLoggedRef.current = true;
+                    try {
+                        addRecentUpload();
+                    } catch (recentError) {
+                        logError("Error updating recent uploads:", recentError);
+                    }
+                    fetchSubscriptionData().catch((fetchErr) => logError("Error refreshing subscription data:", fetchErr));
+                }
+                return;
+            }
+            if (payload.type === "error") {
+                setStreamingError(payload.message || "Failed to generate MCQs. Please try again.");
+                streamAbortRef.current?.abort();
+                return;
+            }
+            if (payload.type === "done") {
+                setIsStreaming(false);
+                setIsInitialLoading(false);
+            }
+        } catch (err) {
+            logError("Failed to parse streaming payload:", { line, err });
+        }
+    }, [appendMcq, addRecentUpload, fetchSubscriptionData, logError]);
+
+    const startStreaming = useCallback(async (sourceId: string, source: StreamingSource, controller: AbortController) => {
+        try {
+            setStreamingError(null);
+            setIsStreaming(true);
+            setIsInitialLoading(items.length === 0);
+            
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+                throw new Error("No active session. Please log in again.");
+            }
+
+            const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+            if (!baseUrl) {
+                throw new Error("Supabase URL is not configured.");
+            }
+
+            const body: Record<string, any> = {
+                stream: true,
+                target_count: STREAM_TARGET_COUNT,
+            };
+
+            if (source.type === "text") {
+                body.text_content = source.text;
+                body.content_type = "text";
+            } else if (source.type === "file") {
+                body.file_data = source.fileData;
+                body.mime_type = source.mimeType;
+            } else {
+                throw new Error("Invalid streaming source. Please try again.");
+            }
+
+            const response = await fetch(`${baseUrl}${function_url}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/x-ndjson",
+                    apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "",
+                    Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify(body),
+                signal: controller.signal,
+            });
+
+            // Check for HTTP errors first
+            if (!response.ok) {
+                let errorText = "";
+                try {
+                    errorText = await response.text();
+                } catch {
+                    errorText = `HTTP ${response.status}: ${response.statusText}`;
+                }
+                throw new Error(errorText || "Failed to generate MCQs.");
+            }
+
+            // Check if ReadableStream is supported
+            if (!response.body || typeof response.body.getReader !== "function") {
+                // Fallback: read entire response as text (for devices without ReadableStream support)
+                log("⚠️ ReadableStream not supported, using fallback mode");
+                try {
+                    const fallbackText = await response.text();
+                    if (!fallbackText || fallbackText.trim().length === 0) {
+                        throw new Error("Received empty response from server.");
+                    }
+
+                    // Parse NDJSON line by line
+                    const lines = fallbackText
+                        .split("\n")
+                        .map(line => line.trim())
+                        .filter(Boolean);
+                    
+                    if (lines.length === 0) {
+                        throw new Error("No data received from server.");
+                    }
+
+                    lines.forEach(line => handleStreamLine(line));
+                    return;
+                } catch (fallbackError: any) {
+                    throw new Error(`Fallback mode failed: ${fallbackError.message || "Unknown error"}`);
+                }
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let newlineIndex: number;
+                while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+                    const line = buffer.slice(0, newlineIndex).trim();
+                    buffer = buffer.slice(newlineIndex + 1);
+                    if (!line) continue;
+                    handleStreamLine(line);
+                }
+            }
+
+            if (buffer.trim()) {
+                handleStreamLine(buffer.trim());
+            }
+        } catch (err: any) {
+            if (err.name === "AbortError") {
+                log("Streaming aborted");
+                return;
+            }
+            logError("Streaming error:", err);
+            setStreamingError(getUserFriendlyError(err));
+        } finally {
+            setIsStreaming(false);
+            setIsInitialLoading(false);
+            streamAbortRef.current = null;
+            removeStreamingSource(sourceId);
+        }
+    }, [appendMcq, handleStreamLine, items.length, log, logError]);
+
+    useEffect(() => {
+        if (!streamingSourceId || streamStartedRef.current) {
+            return;
+        }
+
+        const source = getStreamingSource(streamingSourceId);
+        if (!source) {
+            setStreamingError("Generation session expired. Please re-upload your material.");
+            setIsStreaming(false);
+            setIsInitialLoading(false);
+            return;
+        }
+
+        streamStartedRef.current = true;
+        const controller = new AbortController();
+        streamAbortRef.current = controller;
+
+        startStreaming(streamingSourceId, source, controller);
+
+        return () => {
+            controller.abort();
+            streamAbortRef.current = null;
+            removeStreamingSource(streamingSourceId);
+        };
+    }, [streamingSourceId, startStreaming]);
 
     const renderItem = useCallback(
         ({ item, index }: { item: any; index: number }) => {
@@ -94,8 +297,11 @@ export default function FeedScreen({ navigation, route }: any) {
                             setCorrectAnswers(prev => prev + 1);
                         }
                         
-                        // Navigate to score summary when all questions are answered
-                        if (answeredQuestions.size + 1 === items.length) {
+                        const answeredCount = answeredQuestions.size + 1;
+                        const batchesPending = isStreaming;
+
+                        // Navigate to score summary when all questions are answered and no more batches remain
+                        if (!batchesPending && answeredCount === items.length) {
                             setTimeout(() => {
                                 navigation.navigate('ScoreSummary', {
                                     totalQuestions: items.length,
@@ -109,7 +315,7 @@ export default function FeedScreen({ navigation, route }: any) {
                 />
             );
         }, 
-        [ITEM_HEIGHT, navigation, insets, colors, showSwipeHint, currentQuestion, items.length, correctAnswers, answeredQuestions, userAnswers]
+        [ITEM_HEIGHT, navigation, insets, colors, showSwipeHint, currentQuestion, items, correctAnswers, answeredQuestions, userAnswers, isStreaming]
     );
 
     // Empty state component
@@ -186,6 +392,8 @@ export default function FeedScreen({ navigation, route }: any) {
         [ITEM_HEIGHT]
     ); 
 
+    const waitingForNextBatch = isStreaming && answeredQuestions.size >= items.length;
+
     return (
         <View style={{ flex: 1, backgroundColor: colors.background }}>
             <StatusBar 
@@ -198,7 +406,7 @@ export default function FeedScreen({ navigation, route }: any) {
                 data={items}
                 keyExtractor={(item, index) => `mcq-${index}-${item.question?.substring(0, 20)}`}
                 renderItem={renderItem}
-                ListEmptyComponent={!loading ? renderEmptyState : null}
+                ListEmptyComponent={!isInitialLoading ? renderEmptyState : null}
                 getItemLayout={getItemLayout}
                 pagingEnabled={true}
                 snapToInterval={ITEM_HEIGHT}
@@ -227,7 +435,7 @@ export default function FeedScreen({ navigation, route }: any) {
                 }}
             />
             )}
-            {loading && !error && (
+            {isStreaming && items.length > 0 && !error && (
                 <View style={{
                     position: "absolute",
                     top: insets.top + 60, // Position below status bar
@@ -243,6 +451,18 @@ export default function FeedScreen({ navigation, route }: any) {
                     zIndex: 1000, // Ensure loading indicator is on top
                 }}>
                     <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+            )}
+            {waitingForNextBatch && (
+                <View style={[styles.waitingOverlay, { backgroundColor: colors.card }]}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                    <Text style={[styles.waitingText, { color: colors.foreground }]}>Loading next batch...</Text>
+                </View>
+            )}
+            {streamingError && (
+                <View style={[styles.batchErrorBanner, { borderColor: colors.destructive, backgroundColor: `${colors.destructive}10` }]}>
+                    <Ionicons name="warning" size={16} color={colors.destructive} />
+                    <Text style={[styles.batchErrorText, { color: colors.destructive }]}>{streamingError}</Text>
                 </View>
             )}
         </View>
@@ -359,4 +579,41 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         marginTop: 6,
     },    
+    waitingOverlay: {
+        position: 'absolute',
+        bottom: 120,
+        left: 32,
+        right: 32,
+        borderRadius: 20,
+        paddingVertical: 18,
+        paddingHorizontal: 24,
+        alignItems: 'center',
+        gap: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    waitingText: {
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    batchErrorBanner: {
+        position: 'absolute',
+        bottom: 40,
+        left: 20,
+        right: 20,
+        borderRadius: 12,
+        borderWidth: 1,
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    batchErrorText: {
+        fontSize: 14,
+        flex: 1,
+    },
 });

@@ -6,13 +6,16 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { SubscriptionProvider } from './src/contexts/SubscriptionContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
+import { LocalLLMProvider } from './src/contexts/LocalLLMContext';
 import AuthScreen from './src/screens/AuthScreen';
 import AppNavigator from "./AppNavigator";
 import SplashScreen from './src/components/SplashScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
+import ModelSelection from './src/screens/ModelSelection';
 import { supabase } from './src/lib/supabase';
 import * as Linking from 'expo-linking'; 
 import { NavigationContainer } from '@react-navigation/native';
+import { navigationRef } from './src/lib/navigationRef';
 
 const prefix = Linking.createURL('/'); 
 //redirect users to the update password screen 
@@ -115,9 +118,12 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <SubscriptionProvider>
-            <NavigationContainer linking={linking}>
-              <AppContent />
-            </NavigationContainer>
+            <LocalLLMProvider>
+              <NavigationContainer linking={linking} ref={navigationRef}>
+                <AppContent />
+                <ModelSelection />
+              </NavigationContainer>
+            </LocalLLMProvider>
           </SubscriptionProvider>
         </AuthProvider>
       </ThemeProvider>

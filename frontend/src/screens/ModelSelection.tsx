@@ -1,185 +1,246 @@
-import { useState } from 'react';
-import { Alert, TouchableOpacity, ScrollView } from 'react-native';
-import axios from 'axios';
-import {initLlama, releaseAllLlama} from 'llama.rn';
-import RNFS from 'react-native-fs'; 
-import { downloadModel } from '../lib/model';
+import React from 'react';
+import {
+  Modal,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  SafeAreaView,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
+import ProgressBar from '../components/modelProgressBar';
+import { useTheme } from '../contexts/ThemeContext';
+import { useLocalLLM } from '../contexts/LocalLLMContext';
+import { LOCAL_MODEL } from '../lib/localLLM';
+import { navigationRef } from '../lib/navigationRef';
+import { useSubscription } from '../contexts/SubscriptionContext';
 
-type Message = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+const CARD_GRADIENTS = {
+  free: ['#1E293B', '#0F172A'] as const,
+  pro: ['#6D28D9', '#7C3AED'] as const,
 };
 
-const INITIAL_CONVERSATION: Message[] = [
-    {
-      role: 'system',
-      content:
-        'This is a conversation between user and assistant, a friendly chatbot.',
-    },
-];
+export default function ModelSelection() {
+  const { colors } = useTheme();
+  const { isProUser } = useSubscription();
+  const {
+    showSelection,
+    isDownloading,
+    downloadProgress,
+    activateLocalPlan,
+    activateCloudPlan,
+  } = useLocalLLM();
 
-const [conversation, setConversation] = useState<Message[]>(INITIAL_CONVERSATION);
-const [selectedModelFormat, setSelectedModelFormat] = useState<string>('');
-const [selectedGGUF, setSelectedGGUF] = useState<string | null>(null);
-const [availableGGUFs, setAvailableGGUFs] = useState<string[]>([]);
-const [userInput, setUserInput] = useState<string>('');
-const [progress, setProgress] = useState<number>(0);
-const [context, setContext] = useState<any>(null);
-const [isDownloading, setIsDownloading] = useState<boolean>(false);
-const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  if (!showSelection || isProUser) {
+    return null;
+  }
 
-const modelFormats = [
-    {label: 'Llama-3.2-3B-Instruct'} //this will be shown to the user 
-];
-  
-const HF_TO_GGUF = {
-    "Llama-3.2-3B-Instruct": "bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q5_K_S.gguf" //repo that contains Llama-3.2-3B-Instruct
-};
+  const handleFreePlan = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await activateLocalPlan();
+  };
 
-const fetchAvailableGGUFs = async (modelFormat: string) => {
-    if (!modelFormat) {
-      Alert.alert('Error', 'Please select a model format first.');
-      return;
+  const handleUpgrade = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await activateCloudPlan();
+    if (navigationRef.isReady() && navigationRef.current) {
+      const navigate = navigationRef.current.navigate as (...args: any[]) => void;
+      navigate('Subscription', { source: 'model-selection' });
     }
-  
-    try {
-      const repoPath = HF_TO_GGUF[modelFormat as keyof typeof HF_TO_GGUF];
-      if (!repoPath) {
-        throw new Error(
-          `No repository mapping found for model format: ${modelFormat}`,
-        );
-      }
-  
-      //send query to huggingface to get the list of .gguf files 
-      const response = await axios.get(
-        `https://huggingface.co/api/models/${repoPath}`,
-      );
-  
-      if (!response.data?.siblings) {
-        throw new Error('Invalid API response format');
-      }
-  
-      //keep only the gguf files 
-      const files = response.data.siblings.filter((file: {rfilename: string}) =>
-        file.rfilename.endsWith('.gguf'),
-      );
-  
-      //store only the gguf file names in the state
-      setAvailableGGUFs(files.map((file: {rfilename: string}) => file.rfilename));
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Failed to fetch .gguf files';
-      Alert.alert('Error', errorMessage);
-      setAvailableGGUFs([]);
-    }
-};
+  };
 
-const handleDownloadModel = async (file: string) => {
-    //construct the download URL
-    const downloadUrl = `https://huggingface.co/${
-      HF_TO_GGUF[selectedModelFormat as keyof typeof HF_TO_GGUF]
-    }/resolve/main/${file}`;
-    // we set the isDownloading state to true to show the progress bar and set the progress to 0
-    setIsDownloading(true);
-    setProgress(0);
-  
-    try {
-      // we download the model using the downloadModel function, it takes the selected GGUF file, the download URL, and a progress callback function to update the progress bar
-      const destPath = await downloadModel(file, downloadUrl, progress =>
-        setProgress(progress),
-      );
-      // if the download was successful, load the model into device's memory immediately 
-      if (destPath){
-        await loadModel(file); 
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : 'Download failed due to an unknown error.';
-      Alert.alert('Error', errorMessage);
-    } finally {
-      setIsDownloading(false);
-    }
-};
+  return (
+    <Modal animationType="slide" transparent visible>
+      <SafeAreaView style={[styles.backdrop, { backgroundColor: `${colors.background}EE` }]}>
+        <View style={[styles.container, { backgroundColor: colors.card }]}>
+          <Text style={[styles.title, { color: colors.foreground }]}>
+            Choose how you want to generate MCQs
+          </Text>
+          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
+            Free plan downloads a local model once (~{LOCAL_MODEL.sizeGB}GB). Pro plan uses our cloud AI for faster results.
+          </Text>
 
-const loadModel = async (modelName: string) => {
-    try {
-      //get the destination path 
-      const destPath = `${RNFS.DocumentDirectoryPath}/${modelName}`;
-  
-      // Ensure the model file exists before attempting to load it
-      const fileExists = await RNFS.exists(destPath);
-      if (!fileExists) {
-        Alert.alert('Error Loading Model', 'The model file does not exist.');
-        return false;
-      }
-  
-      // if there is a context, set the context to null
-      // we propably do not need this because we just want to keep generating MCQs infinitely and 
-      // it is not a conversation
-      if (context) {
-        await releaseAllLlama();
-        setContext(null);
-        setConversation(INITIAL_CONVERSATION);
-      }
-  
-      //load local LLM model into device's memory so that it can generate the output 
-      // return LlamaContext object 
-      const llamaContext = await initLlama({
-        model: destPath,
-        use_mlock: true, //prevents from moving memory pages to disk which is smaller than RAM
-        n_ctx: 2048, //context window for LLM to generate the next output
-        n_gpu_layers: 1 //how many transform layers you want to run matrix multiplications on the GPU
-      });
-      console.log("llamaContext", llamaContext);
-      setContext(llamaContext); //store LlamaContext object into the state 
-      return true;
-    } catch (error) {
-      Alert.alert('Error Loading Model', error instanceof Error ? error.message : 'An unknown error occurred.');
-      return false;
-    }
-};
-  
+          <LinearGradient
+            colors={CARD_GRADIENTS.free}
+            style={styles.card}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <View style={styles.cardHeader}>
+              <Ionicons name="infinite" size={24} color="#fff" />
+              <Text style={styles.cardTitle}>Local LLM (Free)</Text>
+            </View>
+            <Text style={styles.cardHighlight}>Download once • Offline • Infinite MCQs</Text>
+            <Text style={styles.cardDescription}>
+              We&apos;ll store the model on your device so you can keep practicing without limits.
+            </Text>
+            <View style={styles.metricsRow}>
+              <View style={styles.metric}>
+                <Text style={styles.metricLabel}>Model size</Text>
+                <Text style={styles.metricValue}>{LOCAL_MODEL.sizeGB.toFixed(1)} GB</Text>
+              </View>
+              <View style={styles.metric}>
+                <Text style={styles.metricLabel}>Latency</Text>
+                <Text style={styles.metricValue}>~3s</Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.primaryButton, isDownloading && styles.buttonDisabled]}
+              onPress={handleFreePlan}
+              disabled={isDownloading}
+            >
+              <Text style={styles.primaryButtonText}>
+                {isDownloading ? 'Downloading...' : 'Download & Continue'}
+              </Text>
+            </TouchableOpacity>
+            {isDownloading && (
+              <View style={styles.progressWrapper}>
+                <ProgressBar progress={downloadProgress} />
+                <Text style={styles.progressLabel}>{downloadProgress}%</Text>
+              </View>
+            )}
+          </LinearGradient>
 
-//button to run fetchAvailableGGUFs function and display the list of gguf files 
-<TouchableOpacity onPress={() => fetchAvailableGGUFs('Llama-3.2-3B-Instruct')}>
-  <Text>Fetch GGUF Files</Text>
-</TouchableOpacity>
-<ScrollView>
-  {availableGGUFs.map((file) => (
-    <Text key={file}>{file}</Text>
-  ))}
-</ScrollView>   
+          <LinearGradient
+            colors={CARD_GRADIENTS.pro}
+            style={styles.card}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <View style={styles.cardHeader}>
+              <Ionicons name="cloud" size={24} color="#fff" />
+              <Text style={styles.cardTitle}>Cloud AI (Pro)</Text>
+            </View>
+            <Text style={styles.cardHighlight}>No download • Fastest responses</Text>
+            <Text style={styles.cardDescription}>
+              We run MCQ generation on our Gemini-powered infrastructure so you don&apos;t need local resources.
+            </Text>
+            <View style={styles.metricsRow}>
+              <View style={styles.metric}>
+                <Text style={styles.metricLabel}>Price</Text>
+                <Text style={styles.metricValue}>$5 / month</Text>
+              </View>
+              <View style={styles.metric}>
+                <Text style={styles.metricLabel}>Latency</Text>
+                <Text style={styles.metricValue}>&lt;1s</Text>
+              </View>
+            </View>
+            <TouchableOpacity style={styles.secondaryButton} onPress={handleUpgrade}>
+              <Text style={styles.secondaryButtonText}>Upgrade for $5 / month</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+}
 
-  
-<View style={{ marginTop: 30, marginBottom: 15 }}>
-  {Object.keys(HF_TO_GGUF).map((format) => (
-    <TouchableOpacity
-      key={format}
-      onPress={() => {
-        setSelectedModelFormat(format);
-      }}
-    >
-      <Text> {format} </Text>
-    </TouchableOpacity>
-  ))}
-</View>
-<Text style={{ marginBottom: 10, color: selectedModelFormat ? 'black' : 'gray' }}>
-  {selectedModelFormat 
-    ? `Selected: ${selectedModelFormat}` 
-    : 'Please select a model format before downloading'}
-</Text>
-<TouchableOpacity
-  onPress={() => {
-    handleDownloadModel("Llama-3.2-3B-Instruct-Q5_K_S.gguf");
-  }}
->
-  <Text>Download Model</Text>
-</TouchableOpacity>
-{isDownloading && <ProgressBar progress={progress} />}
-
-
-
-
-    
+const styles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  container: {
+    width: '100%',
+    borderRadius: 28,
+    padding: 20,
+    gap: 16,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  subtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  card: {
+    borderRadius: 24,
+    padding: 20,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  cardTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  cardHighlight: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cardDescription: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  metric: {
+    flex: 1,
+  },
+  metricLabel: {
+    color: '#cbd5f5',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  metricValue: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  primaryButton: {
+    marginTop: 10,
+    backgroundColor: '#22d3ee',
+    borderRadius: 16,
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  primaryButtonText: {
+    color: '#0f172a',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  secondaryButton: {
+    marginTop: 10,
+    borderRadius: 16,
+    borderColor: '#fff',
+    borderWidth: 1.5,
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  secondaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  progressWrapper: {
+    marginTop: 8,
+  },
+  progressLabel: {
+    marginTop: 4,
+    color: '#cbd5f5',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+});

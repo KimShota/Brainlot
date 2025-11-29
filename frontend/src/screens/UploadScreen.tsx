@@ -27,18 +27,33 @@ export default function UploadScreen({ navigation }: any ){
     const [showTextInputModal, setShowTextInputModal] = useState(false);
     const [textInput, setTextInput] = useState('');
     const MAX_TEXT_LENGTH = 4000;
+    const LOCAL_MATERIAL_LIMIT = 1200;
+
+    const squeezeForLocalLLM = (text: string, limit: number) => {
+        if (text.length <= limit) {
+            return text;
+        }
+        const half = Math.floor(limit / 2);
+        return `${text.slice(0, half)}\n...\n${text.slice(-half)}`;
+    };
 
     const runLocalGeneration = async (material: string, source: 'text' | 'image') => {
         try {
-            if (!material || material.trim().length < 20) {
+            const sanitized = material?.replace(/\s+/g, ' ').trim() ?? '';
+            if (!sanitized || sanitized.length < 20) {
                 throw new Error("We need at least 20 characters to generate meaningful MCQs.");
+            }
+            const truncated = squeezeForLocalLLM(sanitized, LOCAL_MATERIAL_LIMIT);
+            if (sanitized.length !== truncated.length) {
+                log(`🟣 Local LLM input squeezed from ${sanitized.length} to ${truncated.length} characters to stay within limit`);
             }
             log(`🟣 Local LLM generation started (${source})`);
             setLoading(true);
-            // ensure that the local LLM model is loaded in memory 
+            log('🟣 Ensuring local LLM is ready');
             await ensureLocalReady();
+            log('🟣 Local LLM ready. Generating MCQs...');
             // generate 5 MCQs as batch 
-            const mcqs = await generateBatch(material.trim());
+            const mcqs = await generateBatch(truncated);
             log(`🟣 Local LLM returned ${mcqs.length} MCQs`);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             // navigate to feedscreen
@@ -48,7 +63,7 @@ export default function UploadScreen({ navigation }: any ){
                 count: mcqs.length,
                 cached: false,
                 generationStrategy: 'local',
-                studyMaterial: material.trim(),
+                studyMaterial: truncated,
             });
         } catch (error: any) {
             logError('Local LLM generation failed:', error);

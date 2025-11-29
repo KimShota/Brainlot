@@ -1,3 +1,21 @@
+const LOCAL_COMPLETION_TIMEOUT_MS = 90_000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 import { LlamaContext } from 'llama.rn';
 
 export type MCQ = {
@@ -27,12 +45,12 @@ export const LOCAL_MODELS: LocalModelDefinition[] = [
     latencyHint: '~3s',
   },
   {
-    id: 'llama-1b-q8',
-    label: 'Llama 3.2 • 1B (Q8_0)',
-    repo: 'bartowski/Llama-3.2-1B-Instruct-GGUF',
-    file: 'Llama-3.2-1B-Instruct-Q8_0.gguf',
-    sizeGB: 0.8,
-    latencyHint: '~2s',
+    id: 'phi-3_5-mini-q4',
+    label: 'Phi-3.5 Mini • 3.8B (Q4_K_M)',
+    repo: 'bartowski/Phi-3.5-mini-instruct-GGUF',
+    file: 'Phi-3.5-mini-instruct-Q4_K_M.gguf',
+    sizeGB: 2.3,
+    latencyHint: '~4s',
   },
 ];
 
@@ -174,15 +192,21 @@ export async function generateLocalMcqs({
 }): Promise<MCQ[]> {
   const prompt = buildLocalPrompt(material, count); // build the prompt first 
   // call local LLM to generate MCQs
-  const result = await context.completion(
+  const completionPromise = context.completion(
     {
       prompt,
-      n_predict: 768, // max output token is 768
-      temperature: 0.8, // more creative but not too random (more likely to hallucinate)
-      top_p: 0.95, // more words to choose from (more likely to hallucinate)
+      n_predict: 384, // keep output shorter for faster responses
+      temperature: 0.7, // slightly less random for more concise answers
+      top_p: 0.9, // narrower word selection for determinism
       stop: STOP_MARKERS, // stop when Q6 appears
     },
     undefined
+  );
+
+  const result = await withTimeout(
+    completionPromise,
+    LOCAL_COMPLETION_TIMEOUT_MS,
+    'Local model took too long to respond. Please try again with shorter study material.'
   );
 
   // parse the raw output into valid JSON format 

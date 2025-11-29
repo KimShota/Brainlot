@@ -63,6 +63,7 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const llamaRef = useRef<LlamaContext | null>(null);
   const [modelPath, setModelPath] = useState<string | null>(null);
   const [localModelId, setLocalModelId] = useState<string>(DEFAULT_LOCAL_MODEL_ID);
+  const pendingInitRef = useRef<Promise<void> | null>(null);
 
   const storageModeKey = user?.id ? STORAGE_KEYS.mode(user.id) : null;
   const localModelKey = user?.id ? STORAGE_KEYS.localModel(user.id) : null;
@@ -85,6 +86,7 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         llamaRef.current = null;
       }
     }
+    pendingInitRef.current = null;
   }, []);
 
   // if the user navigates away from the localLLM context, reset the state
@@ -123,30 +125,61 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const ensureLocalReady = useCallback(
     async (model: LocalModelDefinition = selectedLocalModel) => {
-    // do nothing if the model is already loaded into memory
-    if (isModelReady && llamaRef.current) {
-      return;
-    }
+      if (llamaRef.current) {
+        if (!isModelReady) {
+          setIsModelReady(true);
+        }
+        return;
+      }
 
-    try {
-      const path = await ensureModelOnDisk(model); // download the model if GGUF file does not exist 
-      // load the local LLM model into memory 
-      const context = await initLlama({
-        model: path,
-        use_mlock: true, // prevent memory pages from moving to a disk which is way smaller than RAM 
-        n_ctx: 2048, // define max token for context window (which includes user prompt, our prompt, response, etc)
-        n_gpu_layers: 1, // how many transform layers we want to perform matrix multiplications through on GPU
-      });
-      llamaRef.current = context;
-      setIsModelReady(true); // set the model as ready 
-      log(`Local LLM (${model.label}) loaded successfully`);
-    } catch (error) {
-      logError('Failed to initialize local LLM', error);
-      setIsModelReady(false);
-      throw error;
-    } finally {
-      setIsDownloading(false);
-    }
+      if (pendingInitRef.current) {
+        await pendingInitRef.current;
+        return;
+      }
+
+      const initPromise = (async () => {
+        try {
+          const path = await ensureModelOnDisk(model); // download the model if GGUF file does not exist
+          const loadWithFallback = async () => {
+            const baseConfig = {
+              model: path,
+              use_mlock: true,
+              n_ctx: 1536,
+              n_gpu_layers: 0,
+            };
+            try {
+              return await initLlama(baseConfig);
+            } catch (primaryError) {
+              logError('Primary LLM init failed, retrying with fallback config', primaryError);
+              const fallbackConfig = {
+                ...baseConfig,
+                use_mlock: false,
+                n_ctx: 1536,
+                n_gpu_layers: 0,
+              };
+              return await initLlama(fallbackConfig);
+            }
+          };
+
+          const context = await loadWithFallback();
+          llamaRef.current = context;
+          setIsModelReady(true); // set the model as ready
+          log(`Local LLM (${model.label}) loaded successfully`);
+        } catch (error) {
+          logError('Failed to initialize local LLM', error);
+          setIsModelReady(false);
+          throw error;
+        } finally {
+          setIsDownloading(false);
+        }
+      })();
+
+      pendingInitRef.current = initPromise;
+      try {
+        await initPromise;
+      } finally {
+        pendingInitRef.current = null;
+      }
     },
     [ensureModelOnDisk, isModelReady, selectedLocalModel]
   );

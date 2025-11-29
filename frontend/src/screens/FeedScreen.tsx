@@ -19,6 +19,7 @@ import { log, error as logError } from "../lib/logger";
 import { getUserFriendlyError } from "../lib/errorUtils";
 import MCQCard from "../components/MCQCard";
 import { useTheme } from "../contexts/ThemeContext";
+import { useLocalLLM } from "../contexts/LocalLLMContext";
 
 const PAGE = 8; // each request will return 8 quizzes 
 
@@ -36,6 +37,10 @@ export default function FeedScreen({ navigation, route }: any) {
 
     // Get MCQs from route params (passed from UploadScreen)
     const routeMcqs = route?.params?.mcqs || [];
+    const generationStrategy = route?.params?.generationStrategy;
+    const studyMaterial = route?.params?.studyMaterial || '';
+    const isLocalInfinite = generationStrategy === 'local' && Boolean(studyMaterial);
+    const { generateBatch } = useLocalLLM();
     
     const [items, setItems] = useState<any[]>(routeMcqs); 
     const [loading, setLoading] = useState(false);
@@ -45,6 +50,10 @@ export default function FeedScreen({ navigation, route }: any) {
     const [correctAnswers, setCorrectAnswers] = useState(0);
     const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
     const [userAnswers, setUserAnswers] = useState<Map<string, number>>(new Map());
+    const [nextBatch, setNextBatch] = useState<any[]>([]);
+    const [isPrefetching, setIsPrefetching] = useState(false);
+    const [prefetchError, setPrefetchError] = useState<string | null>(null);
+    const [waitingForNextBatch, setWaitingForNextBatch] = useState(false);
     
     // Update items when route params change
     useEffect(() => {
@@ -55,8 +64,67 @@ export default function FeedScreen({ navigation, route }: any) {
             setCorrectAnswers(0);
             setAnsweredQuestions(new Set());
             setUserAnswers(new Map());
+            setNextBatch([]);
+            setWaitingForNextBatch(false);
         }
     }, [route?.params?.mcqs]); 
+
+    const resetQuizState = useCallback((newItems: any[]) => {
+        setItems(newItems);
+        setCurrentQuestion(0);
+        setCorrectAnswers(0);
+        setAnsweredQuestions(new Set());
+        setUserAnswers(new Map());
+        setShowSwipeHint(false);
+    }, []);
+
+    const prefetchNextBatch = useCallback(async () => {
+        if (!isLocalInfinite || !studyMaterial || isPrefetching) {
+            return;
+        }
+        setIsPrefetching(true);
+        setPrefetchError(null);
+        try {
+            const batch = await generateBatch(studyMaterial);
+            setNextBatch(batch);
+        } catch (err: any) {
+            setPrefetchError(err?.message || "Failed to generate more MCQs.");
+        } finally {
+            setIsPrefetching(false);
+        }
+    }, [generateBatch, isLocalInfinite, studyMaterial, isPrefetching]);
+
+    const handleBatchCompletion = useCallback(() => {
+        if (!isLocalInfinite) return false;
+        if (nextBatch.length) {
+            resetQuizState(nextBatch);
+            setNextBatch([]);
+            setWaitingForNextBatch(false);
+            prefetchNextBatch();
+        } else {
+            setWaitingForNextBatch(true);
+            if (!isPrefetching) {
+                prefetchNextBatch();
+            }
+        }
+        return true;
+    }, [isLocalInfinite, nextBatch, resetQuizState, prefetchNextBatch, isPrefetching]);
+
+    useEffect(() => {
+        if (isLocalInfinite) {
+            prefetchNextBatch();
+        }
+    }, [isLocalInfinite, prefetchNextBatch]);
+
+    useEffect(() => {
+        if (!isLocalInfinite) return;
+        if (waitingForNextBatch && nextBatch.length) {
+            resetQuizState(nextBatch);
+            setNextBatch([]);
+            setWaitingForNextBatch(false);
+            prefetchNextBatch();
+        }
+    }, [waitingForNextBatch, nextBatch, isLocalInfinite, resetQuizState, prefetchNextBatch]);
 
     const renderItem = useCallback(
         ({ item, index }: { item: any; index: number }) => {
@@ -87,15 +155,24 @@ export default function FeedScreen({ navigation, route }: any) {
                         if (index === 0) {
                             setShowSwipeHint(true);
                         }
-                        
                         setCurrentQuestion(prev => prev + 1);
-                        
+                        const answeredCount = answeredQuestions.size + 1;
+                        const isLastQuestion = answeredCount === items.length;
+
                         if (isCorrect) {
                             setCorrectAnswers(prev => prev + 1);
                         }
                         
-                        // Navigate to score summary when all questions are answered
-                        if (answeredQuestions.size + 1 === items.length) {
+                        if (isLocalInfinite && isLastQuestion) {
+                            const handled = handleBatchCompletion();
+                            if (!handled) {
+                                logError('Local batch completion failed to trigger');
+                            }
+                            return;
+                        }
+
+                        // Navigate to score summary when all questions are answered (remote generation)
+                        if (!isLocalInfinite && isLastQuestion) {
                             setTimeout(() => {
                                 navigation.navigate('ScoreSummary', {
                                     totalQuestions: items.length,
@@ -109,7 +186,7 @@ export default function FeedScreen({ navigation, route }: any) {
                 />
             );
         }, 
-        [ITEM_HEIGHT, navigation, insets, colors, showSwipeHint, currentQuestion, items.length, correctAnswers, answeredQuestions, userAnswers]
+        [ITEM_HEIGHT, navigation, insets, colors, showSwipeHint, currentQuestion, items.length, correctAnswers, answeredQuestions, userAnswers, isLocalInfinite, handleBatchCompletion]
     );
 
     // Empty state component
@@ -245,6 +322,32 @@ export default function FeedScreen({ navigation, route }: any) {
                     <ActivityIndicator size="small" color={colors.primary} />
                 </View>
             )}
+            {isLocalInfinite && (waitingForNextBatch || isPrefetching || prefetchError) && (
+                <View style={[
+                    styles.generatingOverlay,
+                    { backgroundColor: colors.card, bottom: insets.bottom + 24, shadowColor: colors.primary }
+                ]}>
+                    {prefetchError ? (
+                        <>
+                            <Ionicons name="warning" size={18} color={colors.destructive} />
+                            <Text style={[styles.generatingText, { color: colors.foreground }]}>{prefetchError}</Text>
+                            <TouchableOpacity
+                                style={[styles.retryMiniButton, { borderColor: colors.primary }]}
+                                onPress={prefetchNextBatch}
+                            >
+                                <Text style={[styles.retryMiniText, { color: colors.primary }]}>Retry</Text>
+                            </TouchableOpacity>
+                        </>
+                    ) : (
+                        <>
+                            <ActivityIndicator size="small" color={colors.primary} />
+                            <Text style={[styles.generatingText, { color: colors.foreground }]}>
+                                Generating more MCQs...
+                            </Text>
+                        </>
+                    )}
+                </View>
+            )}
         </View>
     ); 
 }
@@ -343,6 +446,36 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
         color: 'white',
+    },
+    generatingOverlay: {
+        position: 'absolute',
+        left: 20,
+        right: 20,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        shadowOpacity: 0.12,
+        shadowOffset: { width: 0, height: 4 },
+        shadowRadius: 10,
+        elevation: 6,
+    },
+    generatingText: {
+        fontSize: 14,
+        fontWeight: '600',
+        flex: 1,
+    },
+    retryMiniButton: {
+        borderWidth: 1,
+        borderRadius: 14,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    retryMiniText: {
+        fontSize: 12,
+        fontWeight: '700',
     },
 
     swipeHintContainer: {

@@ -17,6 +17,7 @@
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
     "@supabase/supabase-js": "^2.58.0",
+    "axios": "^1.13.2",
     "expo": "~54.0.8",
     "expo-application": "^7.0.7",
     "expo-constants": "~18.0.9",
@@ -35,10 +36,12 @@
     "expo-symbols": "~1.0.7",
     "expo-system-ui": "~6.0.7",
     "expo-web-browser": "~15.0.7",
+    "llama.rn": "^0.9.0-rc.3",
     "pdfjs-dist": "^5.4.394",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.4",
+    "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-linear-gradient": "^2.8.3",
     "react-native-purchases": "^9.6.1",
@@ -52,6 +55,7 @@
     "tesseract.js": "^6.0.1"
   },
   "devDependencies": {
+    "@react-native-community/cli": "latest",
     "@types/react": "~19.1.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",

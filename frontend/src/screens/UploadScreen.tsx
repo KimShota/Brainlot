@@ -11,6 +11,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSubscription } from "../contexts/SubscriptionContext"; 
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
+import { useLocalLLM } from "../contexts/LocalLLMContext";
 import * as WebBrowser from "expo-web-browser"; 
 import TextRecognition from 'react-native-text-recognition';
 
@@ -26,7 +27,57 @@ export default function UploadScreen({ navigation }: any ){
     const [showTextInputModal, setShowTextInputModal] = useState(false);
     const [textInput, setTextInput] = useState('');
     const MAX_TEXT_LENGTH = 4000;
+    const LOCAL_MATERIAL_LIMIT = 1200;
+
+    const squeezeForLocalLLM = (text: string, limit: number) => {
+        if (text.length <= limit) {
+            return text;
+        }
+        const half = Math.floor(limit / 2);
+        return `${text.slice(0, half)}\n...\n${text.slice(-half)}`;
+    };
+
+    const runLocalGeneration = async (material: string, source: 'text' | 'image') => {
+        try {
+            const sanitized = material?.replace(/\s+/g, ' ').trim() ?? '';
+            if (!sanitized || sanitized.length < 20) {
+                throw new Error("We need at least 20 characters to generate meaningful MCQs.");
+            }
+            const truncated = squeezeForLocalLLM(sanitized, LOCAL_MATERIAL_LIMIT);
+            if (sanitized.length !== truncated.length) {
+                log(`🟣 Local LLM input squeezed from ${sanitized.length} to ${truncated.length} characters to stay within limit`);
+            }
+            log(`🟣 Local LLM generation started (${source})`);
+            setLoading(true);
+            log('🟣 Ensuring local LLM is ready');
+            await ensureLocalReady();
+            log('🟣 Local LLM ready. Generating MCQs...');
+            // generate 5 MCQs as batch 
+            const mcqs = await generateBatch(truncated);
+            log(`🟣 Local LLM returned ${mcqs.length} MCQs`);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // navigate to feedscreen
+            navigation.navigate('Feed', { 
+                mcqs,
+                generated_at: new Date().toISOString(),
+                count: mcqs.length,
+                cached: false,
+                generationStrategy: 'local',
+                studyMaterial: truncated,
+            });
+        } catch (error: any) {
+            logError('Local LLM generation failed:', error);
+            Alert.alert(
+                "Local Model Error",
+                error?.message || "The offline model could not generate questions. Please try again."
+            );
+        } finally {
+            setLoading(false);
+        }
+    };
     const { canUpload, uploadCount, uploadLimit, isProUser, incrementUploadCount, refreshSubscription, addRecentUpload, fetchSubscriptionData, canUploadNow, uploadsInLastHour, uploadsInLastDay, nextUploadAllowedAt } = useSubscription();
+    const { mode: generationMode, generateBatch, ensureLocalReady } = useLocalLLM();
+    const shouldUseLocalLLM = !isProUser && generationMode === 'local';
 
     // Check and reset daily uploads when screen comes into focus
     // This ensures daily_reset_at is checked every time user navigates to upload screen
@@ -63,6 +114,7 @@ export default function UploadScreen({ navigation }: any ){
 
     //Function to check rate limits for pro users 
     const checkRateLimits = () => {
+        if (shouldUseLocalLLM) return true;
         if (!isProUser) return true; // Free users use existing canUpload logic
         
         if (!canUploadNow) {
@@ -156,7 +208,7 @@ export default function UploadScreen({ navigation }: any ){
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
         // Check upload limit for all users
-        if (!canUpload) {
+        if (!shouldUseLocalLLM && !canUpload) {
             const limitText = isProUser ? 'unlimited' : `${uploadLimit} files per day`;
             Alert.alert(
                 "Upload Limit Reached",
@@ -192,12 +244,17 @@ export default function UploadScreen({ navigation }: any ){
         setShowTextInputModal(false);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
+        if (shouldUseLocalLLM) {
+            await runLocalGeneration(textInput.trim(), 'text');
+            return;
+        }
+
         try {
             log("🟢 Step 1: Starting text processing");
             setLoading(true);
 
             // Check upload limit
-            if (!canUpload) {
+            if (!shouldUseLocalLLM && !canUpload) {
                 const limitText = `${uploadLimit} files per day`;
                 Alert.alert(
                     "Upload Limit Reached",
@@ -312,9 +369,10 @@ export default function UploadScreen({ navigation }: any ){
 
             log(`🟢 Step 7: Generated ${result.mcqs.length} MCQs successfully`);
 
-            // Refresh subscription data
-            await fetchSubscriptionData();
-            addRecentUpload();
+            if (!shouldUseLocalLLM) {
+                await fetchSubscriptionData();
+                addRecentUpload();
+            }
 
             // Navigate to Feed
             log("🟢 Step 8: Navigating to Feed");
@@ -359,7 +417,7 @@ export default function UploadScreen({ navigation }: any ){
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         
         // Check upload limit for all users
-        if (!canUpload) {
+        if (!shouldUseLocalLLM && !canUpload) {
             const limitText = isProUser ? 'unlimited' : `${uploadLimit} files per day`;
             Alert.alert(
                 "Upload Limit Reached",
@@ -401,7 +459,7 @@ export default function UploadScreen({ navigation }: any ){
             setLoading(true);
 
             // 0. Check upload limit BEFORE processing (immediate check)
-            if (!canUpload) {
+            if (!shouldUseLocalLLM && !canUpload) {
                 const limitText = `${uploadLimit} files per day`;
                 Alert.alert(
                     "Upload Limit Reached",
@@ -431,6 +489,11 @@ export default function UploadScreen({ navigation }: any ){
             }
 
             log(`🟢 Step 3: Extracted ${recognizedText.length} characters of text`);
+
+            if (shouldUseLocalLLM) {
+                await runLocalGeneration(recognizedText, 'image');
+                return;
+            }
 
             // 2. Get current user
             log("🟢 Step 4: Authenticating user");
@@ -529,9 +592,10 @@ export default function UploadScreen({ navigation }: any ){
 
             log(`🟢 Step 8: Generated ${result.mcqs.length} MCQs successfully`);
 
-            // 6. Refresh subscription data
-            await fetchSubscriptionData();
-            addRecentUpload();
+            if (!shouldUseLocalLLM) {
+                await fetchSubscriptionData();
+                addRecentUpload();
+            }
 
             // 7. Navigate to Feed
             log("🟢 Step 9: Navigating to Feed");
@@ -578,7 +642,7 @@ export default function UploadScreen({ navigation }: any ){
             log("🟢 Step 1: Starting upload process");
             
             // 0. Check upload limit BEFORE processing file (immediate check)
-            if (!canUpload) {
+            if (!shouldUseLocalLLM && !canUpload) {
                 const limitText = `${uploadLimit} files per day`;
                 Alert.alert(
                     "Upload Limit Reached",

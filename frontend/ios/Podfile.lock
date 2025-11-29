@@ -117,6 +117,28 @@ PODS:
   - libwebp/sharpyuv (1.5.0)
   - libwebp/webp (1.5.0):
     - libwebp/sharpyuv
+  - llama-rn (0.9.0-rc.3):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - PurchasesHybridCommon (17.12.0):
     - RevenueCat (= 5.45.0)
   - RCTDeprecation (0.81.4)
@@ -1398,28 +1420,6 @@ PODS:
     - React-RCTFBReactNativeSpec
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
-  - react-native-pdf-to-image (3.3.0):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
   - react-native-safe-area-context (5.6.1):
     - hermes-engine
     - RCTRequired
@@ -1886,6 +1886,8 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - RNFS (2.20.0):
+    - React-Core
   - RNGestureHandler (2.28.0):
     - hermes-engine
     - RCTRequired
@@ -2142,6 +2144,7 @@ DEPENDENCIES:
   - ExpoWebBrowser (from `../node_modules/expo-web-browser/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
+  - llama-rn (from `../node_modules/llama.rn`)
   - RCTDeprecation (from `../node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)
   - RCTRequired (from `../node_modules/react-native/Libraries/Required`)
   - RCTTypeSafety (from `../node_modules/react-native/Libraries/TypeSafety`)
@@ -2176,7 +2179,6 @@ DEPENDENCIES:
   - React-logger (from `../node_modules/react-native/ReactCommon/logger`)
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
-  - react-native-pdf-to-image (from `../node_modules/react-native-pdf-to-image`)
   - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
   - react-native-text-recognition (from `../node_modules/react-native-text-recognition`)
   - react-native-webview (from `../node_modules/react-native-webview`)
@@ -2212,6 +2214,7 @@ DEPENDENCIES:
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
   - "RNCAsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
+  - RNFS (from `../node_modules/react-native-fs`)
   - RNGestureHandler (from `../node_modules/react-native-gesture-handler`)
   - RNPurchases (from `../node_modules/react-native-purchases`)
   - RNReanimated (from `../node_modules/react-native-reanimated`)
@@ -2283,6 +2286,8 @@ EXTERNAL SOURCES:
   hermes-engine:
     :podspec: "../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec"
     :tag: hermes-2025-07-07-RNv0.81.0-e0fc67142ec0763c6b6153ca2bf96df815539782
+  llama-rn:
+    :path: "../node_modules/llama.rn"
   RCTDeprecation:
     :path: "../node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
@@ -2349,8 +2354,6 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   React-microtasksnativemodule:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
-  react-native-pdf-to-image:
-    :path: "../node_modules/react-native-pdf-to-image"
   react-native-safe-area-context:
     :path: "../node_modules/react-native-safe-area-context"
   react-native-text-recognition:
@@ -2421,6 +2424,8 @@ EXTERNAL SOURCES:
     :podspec: "../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
   RNCAsyncStorage:
     :path: "../node_modules/@react-native-async-storage/async-storage"
+  RNFS:
+    :path: "../node_modules/react-native-fs"
   RNGestureHandler:
     :path: "../node_modules/react-native-gesture-handler"
   RNPurchases:
@@ -2463,6 +2468,7 @@ SPEC CHECKSUMS:
   libavif: 84bbb62fb232c3018d6f1bab79beea87e35de7b7
   libdav1d: 23581a4d8ec811ff171ed5e2e05cd27bad64c39f
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
+  llama-rn: c9a39873fe3a2703f5cbb1ed6e81c38bd2443b41
   PurchasesHybridCommon: c8f805e0f6d3a557a6d63300d0402b8ae5219a48
   RCTDeprecation: 7487d6dda857ccd4cb3dd6ecfccdc3170e85dcbc
   RCTRequired: 54128b7df8be566881d48c7234724a78cb9b6157
@@ -2497,7 +2503,6 @@ SPEC CHECKSUMS:
   React-logger: 7b234de35acb469ce76d6bbb0457f664d6f32f62
   React-Mapbuffer: fbe1da882a187e5898bdf125e1cc6e603d27ecae
   React-microtasksnativemodule: 76905804171d8ccbe69329fc84c57eb7934add7f
-  react-native-pdf-to-image: cda12332f8f1e9d518a9eecd7349375895478192
   react-native-safe-area-context: 42a1b4f8774b577d03b53de7326e3d5757fe9513
   react-native-text-recognition: 2f93fddd03668fc4011dfdb1895324c710a026ca
   react-native-webview: 3e303e80cadb5f17118c8c1502aa398e9287e415
@@ -2534,6 +2539,7 @@ SPEC CHECKSUMS:
   ReactNativeDependencies: ed6d1e64802b150399f04f1d5728ec16b437251e
   RevenueCat: 9d0328a098bd0e1b425d91d136e643b72cd70326
   RNCAsyncStorage: 3a4f5e2777dae1688b781a487923a08569e27fe4
+  RNFS: 89de7d7f4c0f6bafa05343c578f61118c8282ed8
   RNGestureHandler: 2914750df066d89bf9d8f48a10ad5f0051108ac3
   RNPurchases: 14791d01d683a7f334f03d8ffadf92260b3c54a0
   RNReanimated: 1442a577e066e662f0ce1cd1864a65c8e547aee0

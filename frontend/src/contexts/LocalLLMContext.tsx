@@ -11,7 +11,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNFS from 'react-native-fs';
 import { initLlama, releaseAllLlama, LlamaContext } from 'llama.rn';
 import { downloadModel } from '../lib/model';
-import { generateLocalMcqs, LOCAL_MODEL, MCQ } from '../lib/localLLM';
+import {
+  DEFAULT_LOCAL_MODEL_ID,
+  LOCAL_MODELS,
+  MCQ,
+  generateLocalMcqs,
+  getLocalModel,
+  LocalModelDefinition,
+} from '../lib/localLLM';
 import { useAuth } from './AuthContext';
 import { useSubscription } from './SubscriptionContext';
 import { log, error as logError } from '../lib/logger';
@@ -25,6 +32,10 @@ interface LocalLLMContextValue {
   isDownloading: boolean;
   downloadProgress: number;
   showSelection: boolean;
+  localModels: LocalModelDefinition[];
+  selectedLocalModelId: string;
+  selectedLocalModel: LocalModelDefinition;
+  selectLocalModel: (modelId: string) => Promise<void>;
   openSelection: () => void;
   closeSelection: () => void;
   activateLocalPlan: () => Promise<void>;
@@ -35,10 +46,10 @@ interface LocalLLMContextValue {
 
 const LocalLLMContext = createContext<LocalLLMContextValue | undefined>(undefined);
 
-const MODEL_DOWNLOAD_URL = `https://huggingface.co/${LOCAL_MODEL.repo}/resolve/main/${LOCAL_MODEL.file}`;
+// store which MCQ generation mode user selected to choose
 const STORAGE_KEYS = {
   mode: (userId: string) => `mcq_generation_mode_${userId}`,
-  modelPath: 'local_llm_model_path',
+  localModel: (userId: string) => `local_llm_model_${userId}`,
 };
 
 export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -51,15 +62,20 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isModelReady, setIsModelReady] = useState(false);
   const llamaRef = useRef<LlamaContext | null>(null);
   const [modelPath, setModelPath] = useState<string | null>(null);
+  const [localModelId, setLocalModelId] = useState<string>(DEFAULT_LOCAL_MODEL_ID);
 
   const storageModeKey = user?.id ? STORAGE_KEYS.mode(user.id) : null;
+  const localModelKey = user?.id ? STORAGE_KEYS.localModel(user.id) : null;
+  const selectedLocalModel = useMemo(() => getLocalModel(localModelId), [localModelId]);
 
+  // reset the entire localLLM state so that app can start fresh
   const resetState = useCallback(async () => {
     setMode(null);
     setShowSelection(false);
     setIsModelReady(false);
     setDownloadProgress(0);
     setIsDownloading(false);
+    setLocalModelId(DEFAULT_LOCAL_MODEL_ID);
     if (llamaRef.current) {
       try {
         await releaseAllLlama();
@@ -71,11 +87,69 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
+  // if the user navigates away from the localLLM context, reset the state
   useEffect(() => {
     return () => {
       void resetState();
     };
   }, [resetState]);
+
+  // function to check if the model exists or not
+  const ensureModelOnDisk = useCallback(
+    async (model: LocalModelDefinition = selectedLocalModel) => {
+    // construct the destination path 
+    const destPath = `${RNFS.DocumentDirectoryPath}/${model.file}`;
+    // check if the model already exists or not
+    const exists = await RNFS.exists(destPath);
+
+    // store the dest path into model path and set progress to 100 if it exists 
+    if (exists) {
+      setModelPath(destPath);
+      setDownloadProgress(100);
+      return destPath;
+      }
+
+      // if not, download the model by setting progress to 0
+      setIsDownloading(true);
+      setDownloadProgress(0);
+      const modelUrl = `https://huggingface.co/${model.repo}/resolve/main/${model.file}`;
+      const path = await downloadModel(model.file, modelUrl, setDownloadProgress);
+      setIsDownloading(false);
+      setModelPath(path);
+      return path;
+    },
+    [selectedLocalModel]
+  );
+
+  const ensureLocalReady = useCallback(
+    async (model: LocalModelDefinition = selectedLocalModel) => {
+    // do nothing if the model is already loaded into memory
+    if (isModelReady && llamaRef.current) {
+      return;
+    }
+
+    try {
+      const path = await ensureModelOnDisk(model); // download the model if GGUF file does not exist 
+      // load the local LLM model into memory 
+      const context = await initLlama({
+        model: path,
+        use_mlock: true, // prevent memory pages from moving to a disk which is way smaller than RAM 
+        n_ctx: 2048, // define max token for context window (which includes user prompt, our prompt, response, etc)
+        n_gpu_layers: 1, // how many transform layers we want to perform matrix multiplications through on GPU
+      });
+      llamaRef.current = context;
+      setIsModelReady(true); // set the model as ready 
+      log(`Local LLM (${model.label}) loaded successfully`);
+    } catch (error) {
+      logError('Failed to initialize local LLM', error);
+      setIsModelReady(false);
+      throw error;
+    } finally {
+      setIsDownloading(false);
+    }
+    },
+    [ensureModelOnDisk, isModelReady, selectedLocalModel]
+  );
 
   useEffect(() => {
     if (!user?.id) {
@@ -85,27 +159,41 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const hydrate = async () => {
       try {
+        // if the user is pro user, set the mode to cloud so that they can use gemini 
         if (isProUser) {
           setMode('cloud');
           setShowSelection(false);
           return;
         }
 
+        // if no storage key exists, hide the selection mode 
         if (!storageModeKey) {
           setShowSelection(false);
           return;
         }
 
-        const savedMode = await AsyncStorage.getItem(storageModeKey);
+        const [savedMode, savedLocalModelId] = await Promise.all([
+          AsyncStorage.getItem(storageModeKey),
+          localModelKey ? AsyncStorage.getItem(localModelKey) : Promise.resolve(null),
+        ]);
+
+        const resolvedModel = getLocalModel(savedLocalModelId ?? undefined);
+        setLocalModelId(resolvedModel.id);
+        if (resolvedModel.id !== savedLocalModelId && localModelKey) {
+          await AsyncStorage.setItem(localModelKey, resolvedModel.id);
+        }
+
+        // if the user has not chosen a mode, show the selection mode 
         if (!savedMode) {
           setShowSelection(true);
           return;
         }
 
+        // if the user is free plan user, load the local LLM model
         setMode(savedMode as GenerationMode);
         setShowSelection(false);
         if (savedMode === 'local') {
-          await ensureLocalReady();
+          await ensureLocalReady(resolvedModel);
         }
       } catch (error) {
         logError('Error hydrating local LLM state', error);
@@ -114,55 +202,14 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     hydrate();
-  }, [user?.id, isProUser, storageModeKey, resetState]);
-
-  const ensureModelOnDisk = useCallback(async () => {
-    const destPath = `${RNFS.DocumentDirectoryPath}/${LOCAL_MODEL.file}`;
-    const exists = await RNFS.exists(destPath);
-    if (exists) {
-      setModelPath(destPath);
-      setDownloadProgress(100);
-      return destPath;
-    }
-
-    setIsDownloading(true);
-    setDownloadProgress(0);
-    const path = await downloadModel(LOCAL_MODEL.file, MODEL_DOWNLOAD_URL, setDownloadProgress);
-    setIsDownloading(false);
-    setModelPath(path);
-    return path;
-  }, []);
-
-  const ensureLocalReady = useCallback(async () => {
-    if (isModelReady && llamaRef.current) {
-      return;
-    }
-
-    try {
-      const path = await ensureModelOnDisk();
-      const context = await initLlama({
-        model: path,
-        use_mlock: true,
-        n_ctx: 2048,
-        n_gpu_layers: 1,
-      });
-      llamaRef.current = context;
-      setIsModelReady(true);
-      log('Local LLM loaded successfully');
-    } catch (error) {
-      logError('Failed to initialize local LLM', error);
-      setIsModelReady(false);
-      throw error;
-    } finally {
-      setIsDownloading(false);
-    }
-  }, [ensureModelOnDisk, isModelReady]);
+  }, [user?.id, isProUser, storageModeKey, localModelKey, resetState, ensureLocalReady]);
 
   const persistMode = useCallback(
     async (nextMode: GenerationMode) => {
       if (!storageModeKey) {
         return;
       }
+      // store storage mode key into asnycstorage so that app remembers mode permanently 
       await AsyncStorage.setItem(storageModeKey, nextMode);
       setMode(nextMode);
     },
@@ -186,15 +233,19 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setShowSelection(false);
   }, [persistMode, user?.id]);
 
+  // function to generate MCQs using local LLM
   const generateBatch = useCallback(
     async (material: string) => {
+      // validate study material 
       if (!material || !material.trim()) {
         throw new Error('No study material provided.');
       }
+      // ensure local LLM is loaded
       await ensureLocalReady();
       if (!llamaRef.current) {
         throw new Error('Local LLM is not ready yet.');
       }
+      // return generated MCQs
       return generateLocalMcqs({
         context: llamaRef.current,
         material,
@@ -203,6 +254,33 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [ensureLocalReady]
   );
 
+  const selectLocalModel = useCallback(
+    async (nextModelId: string) => {
+      const nextModel = getLocalModel(nextModelId);
+      if (nextModel.id === localModelId) {
+        return;
+      }
+      if (llamaRef.current) {
+        try {
+          await releaseAllLlama();
+        } catch (error) {
+          logError('Error releasing llama context', error);
+        } finally {
+          llamaRef.current = null;
+        }
+      }
+      setIsModelReady(false);
+      setDownloadProgress(0);
+      setModelPath(null);
+      if (localModelKey) {
+        await AsyncStorage.setItem(localModelKey, nextModel.id);
+      }
+      setLocalModelId(nextModel.id);
+    },
+    [localModelId, localModelKey]
+  );
+
+  // bundle all local-LLM-related state and actions into a single object 
   const value = useMemo<LocalLLMContextValue>(
     () => ({
       mode,
@@ -211,6 +289,10 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       isDownloading,
       downloadProgress,
       showSelection: showSelection && !isProUser,
+      localModels: LOCAL_MODELS,
+      selectedLocalModelId: selectedLocalModel.id,
+      selectedLocalModel,
+      selectLocalModel,
       openSelection: () => setShowSelection(true),
       closeSelection: () => setShowSelection(false),
       activateLocalPlan,
@@ -225,6 +307,8 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       isDownloading,
       downloadProgress,
       showSelection,
+      selectedLocalModel,
+      selectLocalModel,
       activateLocalPlan,
       activateCloudPlan,
       ensureLocalReady,

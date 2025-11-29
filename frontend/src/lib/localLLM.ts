@@ -8,15 +8,47 @@ export type MCQ = {
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
-export const LOCAL_MODEL = {
-  label: 'Llama-3.2-3B-Instruct',
-  repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF',
-  file: 'Llama-3.2-3B-Instruct-Q5_K_S.gguf',
-  sizeGB: 1.3,
+export type LocalModelDefinition = {
+  id: string;
+  label: string;
+  repo: string;
+  file: string;
+  sizeGB: number;
+  latencyHint: string;
 };
 
+export const LOCAL_MODELS: LocalModelDefinition[] = [
+  {
+    id: 'llama-3b-q5',
+    label: 'Llama 3.2 • 3B (Q5_K_S)',
+    repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF',
+    file: 'Llama-3.2-3B-Instruct-Q5_K_S.gguf',
+    sizeGB: 1.3,
+    latencyHint: '~3s',
+  },
+  {
+    id: 'llama-1b-q8',
+    label: 'Llama 3.2 • 1B (Q8_0)',
+    repo: 'bartowski/Llama-3.2-1B-Instruct-GGUF',
+    file: 'Llama-3.2-1B-Instruct-Q8_0.gguf',
+    sizeGB: 0.8,
+    latencyHint: '~2s',
+  },
+];
+
+export const DEFAULT_LOCAL_MODEL_ID = LOCAL_MODELS[0].id;
+
+export const getLocalModel = (modelId?: string): LocalModelDefinition => {
+  if (!modelId) {
+    return LOCAL_MODELS[0];
+  }
+  return LOCAL_MODELS.find((model) => model.id === modelId) ?? LOCAL_MODELS[0];
+};
+
+// indicate where to stop the generation
 const STOP_MARKERS = ['Q6:', 'Question 6', '--- END ---'];
 
+// function to create the prompt for local LLM
 export function buildLocalPrompt(material: string, count = 5) {
   return [
     `You are a tutor who writes knowledge-check MCQs.`,
@@ -40,6 +72,7 @@ export function buildLocalPrompt(material: string, count = 5) {
   ].join('\n');
 }
 
+// function to parse the raw output into valid JSON format 
 export function parseLocalMcqResponse(raw: string, expected = 5): MCQ[] {
   if (!raw) {
     return [];
@@ -53,6 +86,7 @@ export function parseLocalMcqResponse(raw: string, expected = 5): MCQ[] {
   const blocks = normalized.match(/Q\d+:[\s\S]*?(?=Q\d+:|$)/g) || [];
   const mcqs: MCQ[] = [];
 
+  // make each Q block
   for (const block of blocks) {
     const lines = block
       .split('\n')
@@ -68,6 +102,7 @@ export function parseLocalMcqResponse(raw: string, expected = 5): MCQ[] {
       continue;
     }
 
+    // extract each option
     const options: string[] = [];
     for (const label of OPTION_LABELS) {
       const optionLine = lines.find((line) => line.startsWith(`${label}:`) || line.startsWith(`${label})`));
@@ -137,19 +172,22 @@ export async function generateLocalMcqs({
   material: string;
   count?: number;
 }): Promise<MCQ[]> {
-  const prompt = buildLocalPrompt(material, count);
+  const prompt = buildLocalPrompt(material, count); // build the prompt first 
+  // call local LLM to generate MCQs
   const result = await context.completion(
     {
       prompt,
-      n_predict: 768,
-      temperature: 0.8,
-      top_p: 0.95,
-      stop: STOP_MARKERS,
+      n_predict: 768, // max output token is 768
+      temperature: 0.8, // more creative but not too random (more likely to hallucinate)
+      top_p: 0.95, // more words to choose from (more likely to hallucinate)
+      stop: STOP_MARKERS, // stop when Q6 appears
     },
     undefined
   );
 
+  // parse the raw output into valid JSON format 
   const raw = (result?.content || result?.text || '').trim();
+  console.log('[localLLM] raw response:', raw);
   const parsed = parseLocalMcqResponse(raw, count);
 
   if (!parsed.length) {

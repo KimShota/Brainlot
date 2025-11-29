@@ -35,10 +35,13 @@ export default function UploadScreen({ navigation }: any ){
             }
             log(`🟣 Local LLM generation started (${source})`);
             setLoading(true);
+            // ensure that the local LLM model is loaded in memory 
             await ensureLocalReady();
+            // generate 5 MCQs as batch 
             const mcqs = await generateBatch(material.trim());
             log(`🟣 Local LLM returned ${mcqs.length} MCQs`);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // navigate to feedscreen
             navigation.navigate('Feed', { 
                 mcqs,
                 generated_at: new Date().toISOString(),

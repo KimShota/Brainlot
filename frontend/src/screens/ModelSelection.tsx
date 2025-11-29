@@ -13,7 +13,6 @@ import { Ionicons } from '@expo/vector-icons';
 import ProgressBar from '../components/modelProgressBar';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLocalLLM } from '../contexts/LocalLLMContext';
-import { LOCAL_MODEL } from '../lib/localLLM';
 import { navigationRef } from '../lib/navigationRef';
 import { useSubscription } from '../contexts/SubscriptionContext';
 
@@ -29,6 +28,10 @@ export default function ModelSelection() {
     showSelection,
     isDownloading,
     downloadProgress,
+    localModels,
+    selectedLocalModelId,
+    selectedLocalModel,
+    selectLocalModel,
     activateLocalPlan,
     activateCloudPlan,
   } = useLocalLLM();
@@ -59,7 +62,8 @@ export default function ModelSelection() {
             Choose how you want to generate MCQs
           </Text>
           <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-            Free plan downloads a local model once (~{LOCAL_MODEL.sizeGB}GB). Pro plan uses our cloud AI for faster results.
+            Free plan downloads one of our local models once (~{selectedLocalModel.sizeGB}GB). Pro plan uses our cloud AI for faster
+            results.
           </Text>
 
           <LinearGradient
@@ -76,14 +80,38 @@ export default function ModelSelection() {
             <Text style={styles.cardDescription}>
               We&apos;ll store the model on your device so you can keep practicing without limits.
             </Text>
+            <View style={styles.modelPicker}>
+              {localModels.map((model) => {
+                const isSelected = model.id === selectedLocalModelId;
+                return (
+                  <TouchableOpacity
+                    key={model.id}
+                    style={[styles.modelOption, isSelected && styles.modelOptionSelected]}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      void selectLocalModel(model.id);
+                    }}
+                    disabled={isDownloading}
+                  >
+                    <View style={styles.modelOptionHeader}>
+                      <Text style={styles.modelOptionLabel}>{model.label}</Text>
+                      {isSelected && <Ionicons name="checkmark-circle" size={18} color="#22d3ee" />}
+                    </View>
+                    <Text style={styles.modelOptionMeta}>
+                      {model.sizeGB.toFixed(1)} GB • {model.latencyHint}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             <View style={styles.metricsRow}>
               <View style={styles.metric}>
                 <Text style={styles.metricLabel}>Model size</Text>
-                <Text style={styles.metricValue}>{LOCAL_MODEL.sizeGB.toFixed(1)} GB</Text>
+                <Text style={styles.metricValue}>{selectedLocalModel.sizeGB.toFixed(1)} GB</Text>
               </View>
               <View style={styles.metric}>
                 <Text style={styles.metricLabel}>Latency</Text>
-                <Text style={styles.metricValue}>~3s</Text>
+                <Text style={styles.metricValue}>{selectedLocalModel.latencyHint}</Text>
               </View>
             </View>
             <TouchableOpacity
@@ -187,6 +215,36 @@ const styles = StyleSheet.create({
     color: '#e2e8f0',
     fontSize: 14,
     lineHeight: 20,
+  },
+  modelPicker: {
+    marginTop: 8,
+    gap: 8,
+  },
+  modelOption: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: 'rgba(15,23,42,0.4)',
+    padding: 12,
+  },
+  modelOptionSelected: {
+    borderColor: '#22d3ee',
+    backgroundColor: 'rgba(34,211,238,0.1)',
+  },
+  modelOptionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modelOptionLabel: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modelOptionMeta: {
+    marginTop: 4,
+    color: '#cbd5f5',
+    fontSize: 12,
   },
   metricsRow: {
     flexDirection: 'row',

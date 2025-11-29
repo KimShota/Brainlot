@@ -64,7 +64,12 @@ export const getLocalModel = (modelId?: string): LocalModelDefinition => {
 };
 
 // indicate where to stop the generation
-const STOP_MARKERS = ['Q6:', 'Question 6', '--- END ---'];
+const BASE_STOP_MARKERS = ['--- END ---'];
+
+const buildStopMarkers = (startIndex: number, batchCount: number) => {
+  const nextIndex = startIndex + batchCount;
+  return [`Q${nextIndex}:`, `Question ${nextIndex}`, ...BASE_STOP_MARKERS];
+};
 
 // function to create the prompt for local LLM
 export function buildLocalPrompt(material: string, count = 5) {
@@ -185,39 +190,63 @@ export async function generateLocalMcqs({
   context,
   material,
   count = 5,
+  startIndex = 1,
+  existingQuestions,
 }: {
   context: LlamaContext;
   material: string;
   count?: number;
+  startIndex?: number;
+  existingQuestions?: Set<string>;
 }): Promise<MCQ[]> {
-  const prompt = buildLocalPrompt(material, count); // build the prompt first 
-  // call local LLM to generate MCQs
-  const completionPromise = context.completion(
-    {
-      prompt,
-      n_predict: 384, // keep output shorter for faster responses
-      temperature: 0.7, // slightly less random for more concise answers
-      top_p: 0.9, // narrower word selection for determinism
-      stop: STOP_MARKERS, // stop when Q6 appears
-    },
-    undefined
-  );
+  const aggregated: MCQ[] = [];
+  const seenQuestions = new Set(existingQuestions ?? []);
+  const MAX_ATTEMPTS = 3;
 
-  const result = await withTimeout(
-    completionPromise,
-    LOCAL_COMPLETION_TIMEOUT_MS,
-    'Local model took too long to respond. Please try again with shorter study material.'
-  );
+  for (let attempt = 0; attempt < MAX_ATTEMPTS && aggregated.length < count; attempt++) {
+    const prompt = buildLocalPrompt(material, count);
+    const completionPromise = context.completion(
+      {
+        prompt,
+        n_predict: 384,
+        temperature: 0.7,
+        top_p: 0.9,
+        stop: buildStopMarkers(startIndex, count),
+      },
+      undefined
+    );
 
-  // parse the raw output into valid JSON format 
-  const raw = (result?.content || result?.text || '').trim();
-  console.log('[localLLM] raw response:', raw);
-  const parsed = parseLocalMcqResponse(raw, count);
+    const result = await withTimeout(
+      completionPromise,
+      LOCAL_COMPLETION_TIMEOUT_MS,
+      'Local model took too long to respond. Please try again with shorter study material.'
+    );
 
-  if (!parsed.length) {
+    const raw = (result?.content || result?.text || '').trim();
+    console.log('[localLLM] raw response:', raw);
+    const parsed = parseLocalMcqResponse(raw, count);
+
+    for (const mcq of parsed) {
+      const questionKey = mcq.question.toLowerCase();
+      if (seenQuestions.has(questionKey)) {
+        continue;
+      }
+      aggregated.push(mcq);
+      seenQuestions.add(questionKey);
+      if (aggregated.length === count) {
+        break;
+      }
+    }
+  }
+
+  if (!aggregated.length) {
     throw new Error('Local model returned an empty response. Please try again.');
   }
 
-  return parsed;
+  if (aggregated.length < count) {
+    throw new Error(`Local model only produced ${aggregated.length} of ${count} questions. Please try again.`);
+  }
+
+  return aggregated;
 }
 

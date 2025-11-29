@@ -94,13 +94,21 @@ export default function FeedScreen({ navigation, route }: any) {
         }
     }, [generateBatch, isLocalInfinite, studyMaterial, isPrefetching]);
 
+    const appendNextBatch = useCallback(() => {
+        if (!nextBatch.length) {
+            return false;
+        }
+        setItems((prev) => [...prev, ...nextBatch]);
+        setNextBatch([]);
+        setWaitingForNextBatch(false);
+        prefetchNextBatch();
+        return true;
+    }, [nextBatch, prefetchNextBatch]);
+
     const handleBatchCompletion = useCallback(() => {
         if (!isLocalInfinite) return false;
         if (nextBatch.length) {
-            resetQuizState(nextBatch);
-            setNextBatch([]);
-            setWaitingForNextBatch(false);
-            prefetchNextBatch();
+            appendNextBatch();
         } else {
             setWaitingForNextBatch(true);
             if (!isPrefetching) {
@@ -108,7 +116,7 @@ export default function FeedScreen({ navigation, route }: any) {
             }
         }
         return true;
-    }, [isLocalInfinite, nextBatch, resetQuizState, prefetchNextBatch, isPrefetching]);
+    }, [isLocalInfinite, nextBatch, appendNextBatch, prefetchNextBatch, isPrefetching]);
 
     useEffect(() => {
         if (isLocalInfinite) {
@@ -119,12 +127,9 @@ export default function FeedScreen({ navigation, route }: any) {
     useEffect(() => {
         if (!isLocalInfinite) return;
         if (waitingForNextBatch && nextBatch.length) {
-            resetQuizState(nextBatch);
-            setNextBatch([]);
-            setWaitingForNextBatch(false);
-            prefetchNextBatch();
+            appendNextBatch();
         }
-    }, [waitingForNextBatch, nextBatch, isLocalInfinite, resetQuizState, prefetchNextBatch]);
+    }, [waitingForNextBatch, nextBatch, isLocalInfinite, appendNextBatch]);
 
     const renderItem = useCallback(
         ({ item, index }: { item: any; index: number }) => {

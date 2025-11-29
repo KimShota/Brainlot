@@ -63,6 +63,10 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const llamaRef = useRef<LlamaContext | null>(null);
   const [modelPath, setModelPath] = useState<string | null>(null);
   const [localModelId, setLocalModelId] = useState<string>(DEFAULT_LOCAL_MODEL_ID);
+  const [localMcqHistory, setLocalMcqHistory] = useState<{ materialKey: string; mcqs: MCQ[] }>({
+    materialKey: '',
+    mcqs: [],
+  });
   const pendingInitRef = useRef<Promise<void> | null>(null);
 
   const storageModeKey = user?.id ? STORAGE_KEYS.mode(user.id) : null;
@@ -77,6 +81,7 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setDownloadProgress(0);
     setIsDownloading(false);
     setLocalModelId(DEFAULT_LOCAL_MODEL_ID);
+    setLocalMcqHistory({ materialKey: '', mcqs: [] });
     if (llamaRef.current) {
       try {
         await releaseAllLlama();
@@ -270,7 +275,8 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const generateBatch = useCallback(
     async (material: string) => {
       // validate study material 
-      if (!material || !material.trim()) {
+      const normalizedMaterial = material?.trim() ?? '';
+      if (!normalizedMaterial) {
         throw new Error('No study material provided.');
       }
       // ensure local LLM is loaded
@@ -278,13 +284,23 @@ export const LocalLLMProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!llamaRef.current) {
         throw new Error('Local LLM is not ready yet.');
       }
-      // return generated MCQs
-      return generateLocalMcqs({
+      const isSameMaterial = localMcqHistory.materialKey === normalizedMaterial;
+      const existingMcqs = isSameMaterial ? localMcqHistory.mcqs : [];
+      const seenQuestions = new Set(existingMcqs.map((mcq) => mcq.question.toLowerCase()));
+      const startIndex = existingMcqs.length + 1;
+      const newBatch = await generateLocalMcqs({
         context: llamaRef.current,
-        material,
+        material: normalizedMaterial,
+        startIndex,
+        existingQuestions: seenQuestions,
       });
+      setLocalMcqHistory({
+        materialKey: normalizedMaterial,
+        mcqs: [...existingMcqs, ...newBatch],
+      });
+      return newBatch;
     },
-    [ensureLocalReady]
+    [ensureLocalReady, localMcqHistory]
   );
 
   const selectLocalModel = useCallback(
